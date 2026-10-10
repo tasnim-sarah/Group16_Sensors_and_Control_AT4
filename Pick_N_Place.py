@@ -12,9 +12,6 @@ from ir_support_extra_robots.robots import Turtlebot3Waffle
 
 # STUDENTBOT6 DH PARAMETERS  - SID: 25829007
 
-
-
-
 d1 = 0.1450 #   d1  = shoulder height off the base (offset along joint-1's z axis)
 a2 = -0.3000 #   a2  = "upper arm" length (link length of joint 2)
 a3 = -0.1900 #   a3  = "forearm" length (link length of joint 3) NEGATIVE LOCAL AXIS ORIENTATION AFTER ALPHA TWIST
