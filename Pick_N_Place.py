@@ -491,6 +491,8 @@ env.step(0.5)
 for q in rtb.jtraj(ur3.q, sol_hover_drop.q, 60).q:
     ur3.q = q
     env.step(0.05)
+ 
+ env.hold()
 
 print("STATUS: Task complete - worker may collect crate")
 print("Task complete: toolbox placed in MilkCrate")
