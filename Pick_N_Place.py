@@ -3,6 +3,7 @@ from math import pi
 import numpy as np
 import roboticstoolbox as rtb
 import swift
+# import mujoco
 from spatialmath import SE3
 from ir_support import CylindricalDHRobotPlot
 from ir_support.robots import UR3e
