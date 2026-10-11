@@ -191,26 +191,6 @@ OBSTACLES = [
 ]
 
 
-
-# DRIVE TURTLEBOT TO PICKUP ZONE and avoid hititgnnayhting 
-
-DRIVE_STEPS_1 = 100
-
-for i in range(DRIVE_STEPS_1):
-    fraction = i / (DRIVE_STEPS_1 - 1)
-    x, y = avoid_obstacles_2d(PARK_X * fraction, PARK_Y * fraction, OBSTACLES)
-    turtlebot.base = SE3(x, y, 0)
-    studentbot.base = turtlebot.base * SE3(0, 0, 0.15)
-
-    env.step(0.05)
-
-# Note: This motion is NOT IK and NOT jtraj.
-# The TurtleBot base is just a free SE3 pose, so we move it by linearly interpolating its x,y position 
-# The avoid_obstacles_2d() function only nudges the path if the base enters a keep‑out circle.
-
-
-
-
 # STUDENTBOT6 PICKUP - IK
 
 
@@ -263,7 +243,6 @@ for q in rtb.jtraj(studentbot.q, sol_hover.q, 30).q:
     # FK every frame: recompute tool pose, re-attach toolbox to it.
     toolbox.T = (studentbot.fkine(studentbot.q) * toolbox_in_student_tool).A
     env.step(0.05)
-
 
 
 #  STUDENTBOT6 TRANSPORTS TOOLBOX TO UR3e STATION
@@ -492,8 +471,7 @@ env.step(0.5)
 for q in rtb.jtraj(ur3.q, sol_hover_drop.q, 60).q:
     ur3.q = q
     env.step(0.05)
- 
- env.hold()
+    env.hold()
 
 print("STATUS: Task complete - worker may collect crate")
 print("Task complete: toolbox placed in MilkCrate")
