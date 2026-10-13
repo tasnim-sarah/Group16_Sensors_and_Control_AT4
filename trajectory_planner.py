@@ -1,86 +1,110 @@
 import mujoco
 import numpy as np
+import roboticstoolbox as rtb
+from spatialmath import SE3
 
-def get_jointplacement(model, joint_names):
+def get_joint_addresses(model, joint_names, data): # finds the current joint angles of the pose 
     qpos_addresses = []
-    dof_addresses = []    
-
+    dof_addresses = []
     for name in joint_names:
-	    id_joint = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
-	    if id_joint == -1:
-            raise ValueError(f"Joint not found:{name}" )
-	    qpos_addresses.append(model.jnt_qposadr[id_joint])
-	    dof_addresses.append(model.jnt_dofadr[id_joint])
-    qpos_addresses = np.array(qpos_addresses)
-    dof_addresses = np.array(dof_addresses)
+        joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
+        if joint_id  == -1:
+            raise ValueError(f"Joint not found:{name}")
+        qpos_addresses.append(model.jnt_qposadr[joint_id])
+        dof_addresses.append(model.jnt_dofadr[joint_id])
+    qpos_addresses = np.array(qpos_addresses, dtype = int)
+    dof_addresses = np.array(dof_addresses, dtype = int)
     current_joint_angles = data.qpos[qpos_addresses].copy()
+    return qpos_addresses, dof_addresses, current_joint_angles
 
-    # Read the current joint positions using the addresses
-    current_joint_angles = data.qpos[qpos_addresses].copy()
-    return np.array(qpos_addresses), np.array(dof_addresses) current_joint_angles
+def actuator_ids(model,joint_names): # actuator uses joint angles to move corresponding links in mujoco
+    actuator_ids = []
+    for name in joint_names:
+            joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
+            if joint_id  == -1:
+                raise ValueError(f"Joint not found:{name}")
+            matches = []
+            for actuator_id in range(model.nu):
+                is_joint_actuator = (model.actuator_trntype[actuator_id] == mujoco.mjttrn.mjTRN_JOINT)
+                controls_this_joint = (model.actuator_trnid[actuator_id,0] == joint_id)
+                if is_joint_actuator and controls_this_joint:
+                    matches.append(actuator_id)
+            if len(matches) != 1:
+                raise ValueError(f"Expected one exact joint actuator for {name},but found {len(matches)}")
+            actuator_ids.append(matches[0])
+    return np.array(actuator_ids, dtype=int)
+
+
+def solve_ik(robot, target_position, q_current, damping = 0.01, max_steps = 100, tolerance = 1e-6):
+    target_position = np.asarray(target_position, dtype=float)
+    q_current = np.asarray(q_current, dtype=float)
+    if target_position.shape != (3,):
+        raise ValueError("target_position must have shape (3,)")
+    if q_current.shape != (robot.n,):
+        raise ValueError("each robot joint must have a corresponding angle in q_current")
+    if not np.all(np.isfinite(target_position)):
+        raise ValueError("target_position needs finite values.")
+    if not np.all(np.isfinite(q_current)):
+        raise ValueError("q_current needs finite values.")
+    if damping <= 0:
+        raise ValueError("damping needs to be positive")
+    if max_steps < 1:
+        raise ValueError("max_steps need to be atleast 1")
+    if tolerance <= 0: 
+        raise ValueError("tolerance should be positive")
+    target_pose = SE3(target_position[0], target_position[1], target_position[2])
+    result = robot.ikine_LM(target_pose, q0=q_current, mask=[1,1,1,0,0,0],method="chan", k = damping, slimit = max_steps, tol = tolerance)
+    if not result.success:
+        raise RuntimeError("Ik did not converge. check if target is reachable.")
+    return result.q
+
+
+
+
     
 
-def ik_solver(model, data, target_pos, joint_names, site_name = "attachment_site", tolerance=1e-3, max_steps = 100, damping= 1e-3):
-    qpos_addresses, dof_addresses = get_jointplacement(model, joint_names)
-    site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, site_name)
-    if site_id == -1:
-        raise ValueError(f"Site not found: {site_name}")
 
-	target_pos = np.asarray(target_pos, dtype=float) # convert the target position into a NumPy array
-    if target_pos.shape != (3,):
-         raise ValueError("target_pos must have [x, y, z]") # checks whether the target has x, y, and z coordinates
 
-	jacobian_position = np.zeros((3, model.nv)) # create an array to store the position jacobian
-    jacobian_rotation = np.zeros((3, model.nv)) # create an array to store the rotational jacobian
 
-	for iteration in range(max_steps): 
-         mujoco.mj_forward(model, data)
-         current_pos = data.site_xpos[site_id].copy() # read the current end effector position in world coordinates
-         error = target_pos - current_pos  # measures the position error
-         if np.linalg.norm(error) < tolerance: 
-             return data.qpos[qpos_addresses].copy()
-         mujoco.mj_jacSite(model, data, jacobian_position, jacobian_rotation, site_id)  #calculate the jacobian of the end effector site
-         J = jacobian_position[:, dof_addresses] #keeps only the columns that are needed by selected arm joints
-         Ds = J.T @ np.linalg.solve(J @ J.T + damping ** 2 * np.eye(3), error)  # calculates the damped least square joint changes
-         data.qpos[qpos_addresses] += Ds
-         
-  mujoco.mj_forward(model, data) # update the end effector position after the final run
-  final_error = np.linalg.norm(target_pos - data.site_xpos[site_id]) 
-  if final_error >= tolerance: 
-      raise RuntimeError(f"IK did not converge. Final position error: {final_error:.6f} m")
-  return data.qpos[qpos_addresses].copy()
 
-  def joint_trajectory(q_start, q_goal, duration,timestep):
-    q_start = np.asarray(q_start, dtype=float)
-    q_goal = np.asarray(q_goal, dtype=float)
-
+def make_trajectory(q_start,q_goal, duration, timestep):
+    q_start = np.asarray(q_start, dtype = float)
+    q_goal = np.asarray(q_goal, dtype = float)
     if q_start.shape != q_goal.shape:
-        raise ValueError("Start and goal must have the same shape.")
-    if duration <= 0 or  timestep <= 0:
-        raise ValueError("Duration and timestep must be positive.")
-    steps = int(np.ceil)
-
-
-def make_joint_trajectory(q_start, q_goal, duration, timestep):
-    q_start = np.asarray(q_start, dtype=float)
-    q_goal = np.asarray(q_goal, dtype=float)
-
-    if q_start.shape != q_goal.shape:
-        raise ValueError("Start and goal must have the same shape.")
-
+        raise ValueError("start and goal need the same number of joints")
+    if q_start.ndim != 1:
+        raise ValueError("joint confirgurations should be 1d arrays")
     if duration <= 0 or timestep <= 0:
-        raise ValueError("Duration and timestep must be positive.")
-    steps = int(np.ceil(duration / timestep)) + 1
+        raise ValueError("duration and timestep should be positive")
+    steps = int(np.ceil(duration/timestep))+1
     times = np.linspace(0,duration, steps)
+    trajectory = rtb.jtraj(q_start, q_goal, times).q
+    return times, trajectory
 
-    trajectory = []
-    for t in times: 
-        s = t/ duration 
-        blend = 3 * s**2 - 2* s**3
-        q_wanted = q_start + blend * (q_goal - q_start)
-        trajectory.append(q_wanted)
-    return times, np.array(trajectory)
+def execute_trajectory(model, data, actuator_ids, times, trajectory):
+    physical_timestep = model.opt.timestep
+    total_steps = int(np.ceil(times[-1]/physical_timestep))
+    for step in range(total_steps + 1):
+        simulation_time = min(step * physical_timestep, times[-1])
+        wanted_angles = np.array([np.interp(simulation_time, times, trajectory[:,joint]) 
+        for joint in range(trajectory.shape[1])])
+        data.ctrl[actuator_ids] = wanted_angles
+        if step < total_steps: 
+            mujoco.mj_step(model,data)
 
+def pixel_to_camerapoint(u,v,depth,fx,fy,cx,cy):
+    xcamera = (u- cx) * depth/ fx
+    ycamera = (v- cy) * depth / fy 
+    zcamera = depth 
+    return np.array([xcamera,ycamera,zcamera])
 
- 
+def cameratobase(point_camera, Tbasecamera):
+    homogenous_point  = np.append(point_camera, 1)
+    point_base_homogenous = T_base_camera @ homogenous_point
+    return point_base_homogenous[:3]
 
+def object_approcach(object_position, approach_height = 0.1): 
+    approach_position = np.array(object_position, dtype = float).copy()
+    approach_position[2] += approach_height
+    return approach_position, np.array(object_position, dtype = float)
+    
