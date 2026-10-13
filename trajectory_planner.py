@@ -2,14 +2,15 @@ import mujoco
 import numpy as np
 import roboticstoolbox as rtb
 from spatialmath import SE3
-
+# finds the robot's joint location inside MUjoco's arrays.
+# it also gets the joints' current angles 
 def get_joint_addresses(model, joint_names, data): # finds the current joint angles of the pose 
     qpos_addresses = []
     dof_addresses = []
     for name in joint_names:
-        joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
+        joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name) # finds the joint's id
         if joint_id  == -1:
-            raise ValueError(f"Joint not found:{name}")
+            raise ValueError(f"Joint not found:{name}") # checks if joint exists 
         qpos_addresses.append(model.jnt_qposadr[joint_id])
         dof_addresses.append(model.jnt_dofadr[joint_id])
     qpos_addresses = np.array(qpos_addresses, dtype = int)
@@ -34,7 +35,8 @@ def actuator_ids(model,joint_names): # actuator uses joint angles to move corres
             actuator_ids.append(matches[0])
     return np.array(actuator_ids, dtype=int)
 
-
+# finds the joint angles that place the end effector at a specified position.
+#how the joint angles change over time from current configuration to the target configuration
 def solve_ik(robot, target_position, q_current, damping = 0.01, max_steps = 100, tolerance = 1e-6):
     target_position = np.asarray(target_position, dtype=float)
     q_current = np.asarray(q_current, dtype=float)
@@ -92,19 +94,24 @@ def execute_trajectory(model, data, actuator_ids, times, trajectory):
         if step < total_steps: 
             mujoco.mj_step(model,data)
 
+# uses the camera's instrinsic calibration paramters and depth to calculate a 3d point. world frame
+
 def pixel_to_camerapoint(u,v,depth,fx,fy,cx,cy):
     xcamera = (u- cx) * depth/ fx
     ycamera = (v- cy) * depth / fy 
     zcamera = depth 
     return np.array([xcamera,ycamera,zcamera])
-
+#transforms that point into the robot's base frame. 
 def cameratobase(point_camera, Tbasecamera):
     homogenous_point  = np.append(point_camera, 1)
     point_base_homogenous = T_base_camera @ homogenous_point
     return point_base_homogenous[:3]
 
-def object_approcach(object_position, approach_height = 0.1): 
-    approach_position = np.array(object_position, dtype = float).copy()
+
+
+#calculates a position above the object by adding an offset to its z coordinate.
+def object_approach(object_position, approach_height = 0.1): 
+    approach_position = np.asarray(object_position, dtype = float).copy()
     approach_position[2] += approach_height
-    return approach_position, np.array(object_position, dtype = float)
-    
+    grasp_object =  approach_position .copy()
+    return approach_position, grasp_object
