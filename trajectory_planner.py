@@ -111,7 +111,153 @@ def cameratobase(point_camera, Tbasecamera):
 
 #calculates a position above the object by adding an offset to its z coordinate.
 def object_approach(object_position, approach_height = 0.1): 
-    approach_position = np.asarray(object_position, dtype = float).copy()
+    object_position = np.asarray(object_position, approach_height = 0.1)
+    approach_position = object_position.copy()
     approach_position[2] += approach_height
     grasp_object =  approach_position .copy()
     return approach_position, grasp_object
+
+
+
+def execute_feedback_trajectory(
+    model,
+    data,
+    actuator_ids,
+    qpos_addresses,
+    times,
+    trajectory,
+    kp=0.2,
+    kd=0.02,
+    rng=None
+):
+    # Create a random-number generator for simulated measurement noise.
+    if rng is None:
+        rng = np.random.default_rng()
+
+    # Read MuJoCo's actual physics timestep.
+    dt = model.opt.timestep
+
+    # Determine the number of controlled joints.
+    n_joints = trajectory.shape[1]
+    n_states = 2 * n_joints
+
+    # --------------------------------------------------
+    # 1. Create the observer's state-space model.
+    # --------------------------------------------------
+
+    I = np.eye(n_joints)
+    Z = np.zeros((n_joints, n_joints))
+
+    # State = [joint positions, joint velocities].
+    A = np.block([
+        [I, dt * I],
+        [Z, I]
+    ])
+
+    # We measure positions only.
+    C = np.hstack([I, Z])
+
+    # Example noise assumptions. These need tuning.
+    Q = np.diag(
+        [1e-7] * n_joints + [1e-4] * n_joints
+    )
+
+    measurement_std = 0.002
+    R = np.eye(n_joints) * measurement_std**2
+
+    # --------------------------------------------------
+    # 2. Initialise the Kalman filter.
+    # --------------------------------------------------
+
+    q_initial = data.qpos[qpos_addresses].copy()
+
+    # Start by assuming the joints are stationary.
+    qd_initial = np.zeros(n_joints)
+
+    xhat = np.concatenate([q_initial, qd_initial])
+    P = np.eye(n_states) * 0.01
+
+    # Calculate desired joint velocities from the trajectory.
+    qd_trajectory = np.gradient(
+        trajectory, times, axis=0
+    )
+
+    # Number of MuJoCo simulation steps.
+    total_steps = int(np.ceil(times[-1] / dt))
+
+    # --------------------------------------------------
+    # 3. Repeat feedback control at every simulation step.
+    # --------------------------------------------------
+
+    for step in range(total_steps + 1):
+
+        # Current time, limited to the trajectory duration.
+        t = min(step * dt, times[-1])
+
+        # Get the desired position for every joint.
+        qref = np.array([
+            np.interp(t, times, trajectory[:, j])
+            for j in range(n_joints)
+        ])
+
+        # Get the desired velocity for every joint.
+        qd_ref = np.array([
+            np.interp(t, times, qd_trajectory[:, j])
+            for j in range(n_joints)
+        ])
+
+        # --------------------------------------------------
+        # 4. Read joint positions from MuJoCo.
+        # --------------------------------------------------
+
+        q_measured = data.qpos[qpos_addresses].copy()
+
+        # Add artificial noise to demonstrate filtering.
+        # For a real sensor, replace this with its measurements.
+        y = q_measured + rng.normal(
+            0.0, measurement_std, size=n_joints
+        )
+
+        # --------------------------------------------------
+        # 5. Update the Kalman filter.
+        # --------------------------------------------------
+
+        # Predict the next state.
+        xpred, Ppred = kalman_predict(
+            xhat, P, A, Q
+        )
+
+        # Correct the prediction using measured positions.
+        xhat, P = update_kalman(
+            xpred, Ppred, y, C, R
+        )
+
+        # Extract estimated positions and velocities.
+        qhat = xhat[:n_joints]
+        qd_hat = xhat[n_joints:]
+
+        # --------------------------------------------------
+        # 6. Calculate the feedback command.
+        # --------------------------------------------------
+
+        q_command = feedbackController(
+            qref,
+            qd_ref,
+            qhat,
+            qd_hat,
+            kp=kp,
+            kd=kd
+        )
+
+        # --------------------------------------------------
+        # 7. SEND THE COMMAND TO THE ACTUATORS.
+        # --------------------------------------------------
+
+        data.ctrl[actuator_ids] = q_command
+
+        # --------------------------------------------------
+        # 8. Move the simulated robot forward one step.
+        # --------------------------------------------------
+
+        if step < total_steps:
+            mujoco.mj_step(model, data)
