@@ -1,0 +1,62 @@
+<mujoco model="ur3e_pick_scene">
+  <!--
+    UR3e pick scene (41014 AT4, Track B).
+    Robot model: SouthColumn76/universal_robots_ur3e (BSD-3, see LICENSE.txt).
+    This file must sit in the SAME folder as ur3e.xml and its assets/ folder,
+    because MuJoCo looks for the meshes relative to this file.
+ 
+    Layout: the robot's base is at the world origin, so the TABLE TOP is at
+    z = 0 and the floor is 0.75 m below it.
+  -->
+  <include file="ur3e.xml"/>
+ 
+  <statistic center="0.3 0 0.1" extent="1.0"/>
+ 
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="150" elevation="-25"/>
+  </visual>
+ 
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
+             markrgb="0.8 0.8 0.8" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
+ 
+    <!-- Square pyramid: 5 cm base, 5 cm tall. MuJoCo builds the shape from these 5 corner points. -->
+    <mesh name="pyramid_mesh" vertex="-0.025 -0.025 0   0.025 -0.025 0   0.025 0.025 0   -0.025 0.025 0   0 0 0.05"/>
+  </asset>
+ 
+  <worldbody>
+    <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane" pos="0 0 -0.75"/>
+ 
+    <!-- Table: top surface at z = 0, the robot base sits on it at the origin -->
+    <geom name="table_top" type="box" pos="0.3 0 -0.375" size="0.4 0.6 0.375" rgba="0.6 0.45 0.3 1"/>
+ 
+    <!-- Objects: each has a freejoint so it can be grasped and randomised -->
+    <body name="cube" pos="0.35 0.12 0.021">
+      <freejoint name="cube_joint"/>
+      <geom name="cube_geom" type="box" size="0.02 0.02 0.02" mass="0.05" rgba="0.9 0.1 0.1 1" friction="1.5 0.01 0.001"/>
+    </body>
+ 
+    <body name="sphere" pos="0.40 -0.05 0.021">
+      <freejoint name="sphere_joint"/>
+      <geom name="sphere_geom" type="sphere" size="0.02" mass="0.04" rgba="0.1 0.3 0.9 1" friction="1.5 0.01 0.001"/>
+    </body>
+ 
+    <body name="pyramid" pos="0.30 -0.15 0.02">
+      <freejoint name="pyramid_joint"/>
+      <geom name="pyramid_geom" type="mesh" mesh="pyramid_mesh" mass="0.03" rgba="0.95 0.8 0.1 1" friction="1.5 0.01 0.001"/>
+    </body>
+ 
+    <!-- Drop-off zone: visual only -->
+    <geom name="dropoff_zone" type="box" pos="0.15 0.30 0.001" size="0.06 0.06 0.001"
+          rgba="0.1 0.8 0.1 0.5" contype="0" conaffinity="0"/>
+ 
+    <!-- Overview camera for testing and the demo video -->
+    <camera name="overview" pos="1.2 0 0.8" xyaxes="0 1 0 -0.5 0 0.85"/>
+  </worldbody>
+</mujoco>
+ 
