@@ -10,7 +10,7 @@ import numpy as np
 model = mujoco.MjModel.from_xml_path("pick_scene.xml")
 data = mujoco.MjData(model)
  
-# Home pose from the UR3e repo (radians): pan, lift, elbow, wrist1, wrist2, wrist3
+# Home pose from the falque UR3e repo (pan, lift, elbow, wrist1, wrist2, wrist3)
 HOME = np.array([-1.5708, -1.5708, 1.5708, -1.5708, -1.5708, 0.0])
 data.qpos[:6] = HOME
 data.ctrl[:6] = HOME
