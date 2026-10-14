@@ -1,7 +1,5 @@
 import mujoco
 import mujoco.viewer
-import glfw
-import _cffi_backend as backend
 from pathlib import Path
 
 # Path to the UR3e MJCF model
