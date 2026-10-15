@@ -189,9 +189,6 @@ def execute_feedback_trajectory(model,data,actuator_ids,qpos_addresses,times,tra
     n_joints = trajectory.shape[1]
     n_states = 2 * n_joints
 
-    # --------------------------------------------------
-    # 1. Create the observer's state-space model.
-    # --------------------------------------------------
 
     I = np.eye(n_joints)
     Z = np.zeros((n_joints, n_joints))
@@ -213,9 +210,7 @@ def execute_feedback_trajectory(model,data,actuator_ids,qpos_addresses,times,tra
     measurement_std = 0.002
     R = np.eye(n_joints) * measurement_std**2
 
-    # --------------------------------------------------
-    # 2. Initialise the Kalman filter.
-    # --------------------------------------------------
+
 
     q_initial = data.qpos[qpos_addresses].copy()
 
@@ -233,9 +228,7 @@ def execute_feedback_trajectory(model,data,actuator_ids,qpos_addresses,times,tra
     # Number of MuJoCo simulation steps.
     total_steps = int(np.ceil(times[-1] / dt))
 
-    # --------------------------------------------------
-    # 3. Repeat feedback control at every simulation step.
-    # --------------------------------------------------
+   
 
     for step in range(total_steps + 1):
 
@@ -254,9 +247,7 @@ def execute_feedback_trajectory(model,data,actuator_ids,qpos_addresses,times,tra
             for j in range(n_joints)
         ])
 
-        # --------------------------------------------------
-        # 4. Read joint positions from MuJoCo.
-        # --------------------------------------------------
+    
 
         q_measured = data.qpos[qpos_addresses].copy()
 
@@ -266,9 +257,7 @@ def execute_feedback_trajectory(model,data,actuator_ids,qpos_addresses,times,tra
             0.0, measurement_std, size=n_joints
         )
 
-        # --------------------------------------------------
-        # 5. Update the Kalman filter.
-        # --------------------------------------------------
+     
 
         # Predict the next state.
         xpred, Ppred = kalman_predict(
@@ -284,9 +273,7 @@ def execute_feedback_trajectory(model,data,actuator_ids,qpos_addresses,times,tra
         qhat = xhat[:n_joints]
         qd_hat = xhat[n_joints:]
 
-        # --------------------------------------------------
-        # 6. Calculate the feedback command.
-        # --------------------------------------------------
+     
 
         q_command = feedbackController(
             qref,
@@ -297,15 +284,10 @@ def execute_feedback_trajectory(model,data,actuator_ids,qpos_addresses,times,tra
             kd=kd
         )
 
-        # --------------------------------------------------
-        # 7. SEND THE COMMAND TO THE ACTUATORS.
-        # --------------------------------------------------
 
         data.ctrl[actuator_ids] = q_command
 
-        # --------------------------------------------------
-        # 8. Move the simulated robot forward one step.
-        # --------------------------------------------------
+    
 
         if step < total_steps:
             mujoco.mj_step(model, data)
