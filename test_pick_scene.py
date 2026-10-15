@@ -27,7 +27,7 @@ wrist_cam.alt.xyaxes = [1, 0, 0, 0, 0, 1]
  
 model = spec.compile()
 data = mujoco.MjData(model)
- 
+
 
 # Home pose and random object positions
 # Home pose from the UR3e repo 
