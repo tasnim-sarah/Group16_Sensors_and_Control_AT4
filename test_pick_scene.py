@@ -8,10 +8,8 @@ import mujoco
 import mujoco.viewer
 import numpy as np
  
-HERE = Path(__file__).parent  
- 
 
-spec = mujoco.MjSpec.from_file(str(HERE / "universal_robots_ur3e" / "pick_scene.xml"))
+spec = mujoco.MjSpec.from_file(str(Path(__file__).parent   / "universal_robots_ur3e" / "pick_scene.xml"))
  
 
 for key in list(spec.keys):
