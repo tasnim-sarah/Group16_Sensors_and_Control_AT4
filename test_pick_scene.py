@@ -7,7 +7,7 @@ from pathlib import Path
 import mujoco
 import mujoco.viewer
 import numpy as np
- 
+
 
 spec = mujoco.MjSpec.from_file(str(Path(__file__).parent   / "universal_robots_ur3e" / "pick_scene.xml"))
  
@@ -48,6 +48,9 @@ mujoco.mj_forward(model, data)
 for body in ["red_cube", "yellow_cube", "blue_cube"]:
     print(f"{body:12s} at", np.round(data.body(body).xpos, 3))
 print("Tip: Rendering -> Camera -> wrist_cam shows what the robot sees.")
+
+for n in ["red_bin", "yellow_bin", "blue_bin"]:
+    print(n, model.body(n).pos)
  
 # Run
 with mujoco.viewer.launch_passive(model, data) as viewer:
