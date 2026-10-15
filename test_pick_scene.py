@@ -38,17 +38,17 @@ data.qpos[:6] = HOME
 data.ctrl[:6] = HOME
  
 rng = np.random.default_rng()
-spots = [(0.28, 0.42, 0.05, 0.20),    
+spots = [(0.28, 0.42, 0.05, 0.20),     # x range, y range for each object
          (0.28, 0.42, -0.08, 0.05),
          (0.28, 0.42, -0.20, -0.08)]
 rng.shuffle(spots)
-for name, (x0, x1, y0, y1) in zip(["cube_joint", "sphere_joint", "pyramid_joint"], spots):
+for name, (x0, x1, y0, y1) in zip(["red_cube_joint", "yellow_cube_joint", "blue_cube_joint"], spots):
     adr = model.jnt_qposadr[model.joint(name).id]
     data.qpos[adr:adr + 2] = [rng.uniform(x0, x1), rng.uniform(y0, y1)]
 mujoco.mj_forward(model, data)
  
-for body in ["cube", "sphere", "pyramid"]:
-    print(f"{body:8s} at", np.round(data.body(body).xpos, 3))
+for body in ["red_cube", "yellow_cube", "blue_cube"]:
+    print(f"{body:12s} at", np.round(data.body(body).xpos, 3))
 print("Tip: Rendering -> Camera -> wrist_cam shows what the robot sees.")
  
 # Run
