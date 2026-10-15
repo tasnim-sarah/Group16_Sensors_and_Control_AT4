@@ -26,7 +26,7 @@ def actuator_ids(model,joint_names): # actuator uses joint angles to move corres
                 raise ValueError(f"Joint not found:{name}")
             matches = []
             for actuator_id in range(model.nu):
-                is_joint_actuator = (model.actuator_trntype[actuator_id] == mujoco.mjttrn.mjTRN_JOINT)
+                is_joint_actuator = (model.actuator_trntype[actuator_id] == mujoco.mjtTrn.mjTRN_JOINT)
                 controls_this_joint = (model.actuator_trnid[actuator_id,0] == joint_id)
                 if is_joint_actuator and controls_this_joint:
                     matches.append(actuator_id)
@@ -37,7 +37,8 @@ def actuator_ids(model,joint_names): # actuator uses joint angles to move corres
 
 # finds the joint angles that place the end effector at a specified position.
 #how the joint angles change over time from current configuration to the target configuration
-def solve_ik(robot, target_position, q_current, damping = 0.01, max_steps = 100, tolerance = 1e-6):
+
+def solve_ik(robot,target_position, q_current, damping = 0.01, max_steps = 100, tolerance = 1e-6):
     target_position = np.asarray(target_position, dtype=float)
     q_current = np.asarray(q_current, dtype=float)
     if target_position.shape != (3,):
@@ -55,7 +56,7 @@ def solve_ik(robot, target_position, q_current, damping = 0.01, max_steps = 100,
     if tolerance <= 0: 
         raise ValueError("tolerance should be positive")
     target_pose = SE3(target_position[0], target_position[1], target_position[2])
-    result = robot.ikine_LM(target_pose, q0=q_current, mask=[1,1,1,0,0,0],method="chan", k = damping, slimit = max_steps, tol = tolerance)
+    result = robot.ikine_LM(target_pose, q0=q_current, mask=[1,1,1,0,0,0],method="chan", k = damping, ilimit = max_steps, tol = tolerance)
     if not result.success:
         raise RuntimeError("Ik did not converge. check if target is reachable.")
     return result.q
@@ -83,16 +84,6 @@ def make_trajectory(q_start,q_goal, duration, timestep):
     trajectory = rtb.jtraj(q_start, q_goal, times).q
     return times, trajectory
 
-def execute_trajectory(model, data, actuator_ids, times, trajectory):
-    physical_timestep = model.opt.timestep
-    total_steps = int(np.ceil(times[-1]/physical_timestep))
-    for step in range(total_steps + 1):
-        simulation_time = min(step * physical_timestep, times[-1])
-        wanted_angles = np.array([np.interp(simulation_time, times, trajectory[:,joint]) 
-        for joint in range(trajectory.shape[1])])
-        data.ctrl[actuator_ids] = wanted_angles
-        if step < total_steps: 
-            mujoco.mj_step(model,data)
 
 # uses the camera's instrinsic calibration paramters and depth to calculate a 3d point. world frame
 
@@ -101,35 +92,92 @@ def pixel_to_camerapoint(u,v,depth,fx,fy,cx,cy):
     ycamera = (v- cy) * depth / fy 
     zcamera = depth 
     return np.array([xcamera,ycamera,zcamera])
+
 #transforms that point into the robot's base frame. 
+
 def cameratobase(point_camera, Tbasecamera):
     homogenous_point  = np.append(point_camera, 1)
-    point_base_homogenous = T_base_camera @ homogenous_point
+    point_base_homogenous = Tbasecamera @ homogenous_point
     return point_base_homogenous[:3]
 
 
 
 #calculates a position above the object by adding an offset to its z coordinate.
 def object_approach(object_position, approach_height = 0.1): 
-    object_position = np.asarray(object_position, approach_height = 0.1)
+    object_position = np.asarray(object_position, dtype = float)
     approach_position = object_position.copy()
     approach_position[2] += approach_height
-    grasp_object =  approach_position .copy()
+    grasp_object =  object_position .copy()
     return approach_position, grasp_object
 
 
+There were two bugs in your version.
 
-def execute_feedback_trajectory(
-    model,
-    data,
-    actuator_ids,
-    qpos_addresses,
-    times,
-    trajectory,
-    kp=0.2,
-    kd=0.02,
-    rng=None
-):
+
+def make_state (dt, n_joints): 
+    if dt <= 0 or n_joints < 1: 
+        raise ValueError("dt and n_joints need to be positive.")
+    I = np.eye(n_joints)
+    Z = np.zeros((n_joints, n_joints))
+    A = np.block([[I,dt * I],[Z,I]])
+    B = np.vstack([0.5 * dt **2 * I,dt* I])
+    C = np.hstack([I,Z])
+    D = np.zeros((n_joints, n_joints))
+    return A, B, C, D
+
+def controllability_matrix (A, B):
+    n_states = A.shape[0]
+    blocks = []
+    current = B.copy()
+    for _ in range (n_states): 
+        blocks.append(current)
+        current = A @ current
+    return np.hstack(blocks)
+
+def observability_matrix(A,C):
+    n_states = A.shape[0]
+    blocks = []
+    current = C.copy()
+    for _ in range(n_states):
+        blocks.append(current)
+        current = current @ A
+    return np.vstack(blocks)
+
+def analyse_system(A,B,C):
+    n_states = A.shape[0]
+    controllability_rank = np.linalg.matrix_rank(controllability_matrix(A,B))
+    observability_rank = np.linalg.matrix_rank(observability_matrix(A, C))
+    print("number of states:", n_states)
+    print("Controllability rank:", controllability_rank)
+    print("fully controllable: ", controllability_rank == n_states)
+    print("Observability rank:", observability_rank)
+    print("Fully observable:", observability_rank == n_states)
+    return contrability_rank, observability_rank
+
+def kalman_predict(xhat, P,A, Q):
+    xpred = A @ xhat
+    Ppred = A @ P @ A.T + Q 
+    return xpred, Ppred
+
+def update_kalman(xpred, Ppred, y,C, R):
+    diff = y - C @ xpred
+    S = C @ Ppred @ C.T + R
+    K = np.linalg.solve(S, C @ Ppred).T
+    xhat = xpred + K @ diff
+    I = np.eye(Ppred.shape[0])
+    correction = I - K @ C
+    P = correction @ Ppred @ correction.T + K @ R @ K.T
+    return xhat, P
+
+def feedbackController( qref, qd_ref, qhat, qd_hat, kp = 0.2, kd = 0.02):
+    pos_error = qref - qhat
+    vel_error = qd_ref - qd_hat
+    q_command = (qref + kp * pos_error + kd * vel_error)
+    return q_command
+
+
+
+def execute_feedback_trajectory(model,data,actuator_ids,qpos_addresses,times,trajectory,kp=0.2,kd=0.02,rng=None):
     # Create a random-number generator for simulated measurement noise.
     if rng is None:
         rng = np.random.default_rng()
