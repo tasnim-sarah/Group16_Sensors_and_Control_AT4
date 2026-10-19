@@ -7,11 +7,9 @@ from pathlib import Path
 import mujoco
 import mujoco.viewer
 import numpy as np
- 
-HERE = Path(__file__).parent  
- 
 
-spec = mujoco.MjSpec.from_file(str(HERE / "universal_robots_ur3e" / "pick_scene.xml"))
+
+spec = mujoco.MjSpec.from_file(str(Path(__file__).parent   / "universal_robots_ur3e" / "pick_scene.xml"))
  
 
 for key in list(spec.keys):
@@ -62,7 +60,7 @@ grip.forcerange = [-20, 20]
 
 model = spec.compile() 
 data = mujoco.MjData(model)
- 
+
 
 # Home pose and random object positions
 # Home pose from the UR3e repo 
@@ -83,6 +81,9 @@ mujoco.mj_forward(model, data)
 for body in ["red_cube", "yellow_cube", "blue_cube"]:
     print(f"{body:12s} at", np.round(data.body(body).xpos, 3))
 print("Tip: Rendering -> Camera -> wrist_cam shows what the robot sees.")
+
+for n in ["red_bin", "yellow_bin", "blue_bin"]:
+    print(n, model.body(n).pos)
  
 # Run
 with mujoco.viewer.launch_passive(model, data) as viewer:
