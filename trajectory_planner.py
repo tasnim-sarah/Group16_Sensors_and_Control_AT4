@@ -110,10 +110,6 @@ def object_approach(object_position, approach_height = 0.1):
     grasp_object =  object_position .copy()
     return approach_position, grasp_object
 
-
-There were two bugs in your version.
-
-
 def make_state (dt, n_joints): 
     if dt <= 0 or n_joints < 1: 
         raise ValueError("dt and n_joints need to be positive.")
@@ -152,7 +148,7 @@ def analyse_system(A,B,C):
     print("fully controllable: ", controllability_rank == n_states)
     print("Observability rank:", observability_rank)
     print("Fully observable:", observability_rank == n_states)
-    return contrability_rank, observability_rank
+    return controllability_rank, observability_rank
 
 def kalman_predict(xhat, P,A, Q):
     xpred = A @ xhat
