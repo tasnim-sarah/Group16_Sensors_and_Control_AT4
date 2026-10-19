@@ -86,12 +86,61 @@ for n in ["red_bin", "yellow_bin", "blue_bin"]:
     print(n, model.body(n).pos)
  
 # Run
-with mujoco.viewer.launch_passive(model, data) as viewer:
-    while viewer.is_running():
-        t0 = time.time()
-        data.ctrl[:6] = HOME
+##########with mujoco.viewer.launch_passive(model, data) as viewer:
+    #########while viewer.is_running():
+       ######## t0 = time.time()
+        #######data.ctrl[:6] = HOME
+       ###### mujoco.mj_step(model, data)
+        #####viewer.sync()
+        ####sleep = model.opt.timestep - (time.time() - t0)
+        ##if sleep > 0:
+            #time.sleep(sleep)
+def move_ball_back_and_forth(model, data, viewer,
+                             direction="x",
+                             distance=0.14,
+                             duration=10,
+                             speed=0.05):
+
+    joint = model.joint("sphere_joint").id
+    adr = model.jnt_qposadr[joint]
+
+    # Choose the axis: x or y
+    axis = 0 if direction == "x" else 1
+
+    start = data.qpos[adr + axis]
+    low = start - distance / 2
+    high = start + distance / 2
+
+    position = start
+    sign = 1
+    elapsed = 0
+
+    while viewer.is_running() and elapsed < duration:
+        step = model.opt.timestep
+        position += sign * speed * step
+
+        if position >= high:
+            position = high
+            sign = -1
+        elif position <= low:
+            position = low
+            sign = 1
+
+        data.qpos[adr + axis] = position
+
         mujoco.mj_step(model, data)
+        mujoco.mj_forward(model, data)
         viewer.sync()
-        sleep = model.opt.timestep - (time.time() - t0)
-        if sleep > 0:
-            time.sleep(sleep)
+
+        time.sleep(step)
+        elapsed += step
+
+ # Run
+with mujoco.viewer.launch_passive(model, data) as viewer:
+    move_ball_back_and_forth(
+        model, data, viewer,
+        direction="y",
+        distance=0.5,
+        duration=30,
+        speed=0.05
+    )
