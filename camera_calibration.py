@@ -325,7 +325,7 @@ def servo_tick(ref, v_ref, R_target, q_cmd, dt, kp_pos=4.0, kp_rot=1.5):
     pos_err = ref - data.site_xpos[TCP]
     ori_err = rotation_error(data.site_xmat[TCP].reshape(3, 3), R_target)
     jpos = np.zeros((3, model.nv))
-    jrot = np.zeros((3, model.nv))
+    jrot = np.zeros((3, model.nv)) 
     mujoco.mj_jacSite(model, data, jpos, jrot, TCP)
     J = np.vstack((jpos[:, dadr], jrot[:, dadr]))
     command = np.concatenate((v_ref + kp_pos * pos_err, kp_rot * ori_err))
