@@ -8,6 +8,9 @@ import mujoco
 import mujoco.viewer
 import numpy as np
 
+import matplotlib.pyplot as plt
+from camera_module import CameraSensor, add_wrist_camera, aim_camera_once
+
 
 spec = mujoco.MjSpec.from_file(str(Path(__file__).parent   / "universal_robots_ur3e" / "pick_scene.xml"))
  
