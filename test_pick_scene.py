@@ -101,7 +101,7 @@ def move_ball_back_and_forth(model, data, viewer,
                              duration=10,
                              speed=0.05):
 
-    joint = model.joint("sphere_joint").id
+    joint = model.joint("red_cube_joint").id
     adr = model.jnt_qposadr[joint]
 
     # Choose the axis: x or y
