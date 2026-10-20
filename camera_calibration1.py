@@ -1,13 +1,21 @@
 import re
 import sys
 import time
-from pathlib import Path
+from pathlib import Path 
 
 import cv2
 import mujoco
 import mujoco.viewer
 import numpy as np
-from camera_module import CameraSensor, aim_camera_once
+import cameramodulekal_1
+from cameramodulekal_1 import CameraSensor, add_wrist_camera, aim_camera_once
+
+
+print("Camera module loaded from:", cameramodulekal_1.__file__)
+print(
+    "CameraSensor has estimate:",
+    hasattr(cameramodulekal_1.CameraSensor, "estimate")
+)
 
 # ==================================================
 # MOVING-CUBE HELPERS (scripted cube + pause predictor)
@@ -38,7 +46,7 @@ class SweepingCube:
 
     def __init__(self, model, data, joint_name="red_cube_joint",
                  x=0.30, y_low=-0.17, y_high=0.17,
-                 move_time=4.5, pause_time=6.0):
+                 move_time=4.5, pause_time=4.0):
         jid = model.joint(joint_name).id
         self.model, self.data = model, data
         self.qadr = int(model.jnt_qposadr[jid])
@@ -111,11 +119,11 @@ class PausePredictor:
     """
 
     V_STOP = 0.02        # m/s  below this (for MIN_STOP_TIME) -> paused
-    V_GO = 0.04          # m/s  above this -> moving again (hysteresis)
+    V_GO = 0.05          # m/s  above this -> moving again (hysteresis)
     MIN_STOP_TIME = 0.20  # s
     SPEED_WINDOW = 0.5   # s   speed = filtered displacement over this window
     MIN_UPDATES = 15     # ignore the filter until it has converged
-    MIN_PAUSE = 1.0      # s   shorter "pauses" are treated as noise
+    MIN_PAUSE = 2.0      # s   shorter "pauses" are treated as noise
     MIN_END_SEPARATION = 0.05  # m, to call two pauses "different end points"
 
     def __init__(self, verbose=True):
@@ -245,15 +253,15 @@ LANE_X = 0.30            # red cube sweeps along Y at this X
 LANE_Y_LOW = -0.17
 LANE_Y_HIGH = 0.17
 MOVE_TIME = 4.5          # s to travel one way
-PAUSE_TIME = 6.0         # s the cube stands still at each end
+PAUSE_TIME = 7.0         # s the cube stands still at each end
 TRACK_DT = 0.05          # s of sim time between camera frames (20 Hz)
 
 # ---- Pause-grab tuning ---------------------------------------------------
 MOVING_HOVER = 0.10      # m above the grasp height while waiting for the pause
-PAUSE_SETTLE = 0.30      # s after predicted pause start before descending
-PAUSE_MARGIN = 1.5       # s safety margin removed from the learned pause length
-GRASP_BUDGET = 3.5       # s needed for descend + close + clamp
-MAX_ATTEMPTS = 4
+PAUSE_SETTLE = 0.20      # s after predicted pause start before descending
+PAUSE_MARGIN = 0.5       # s safety margin removed from the learned pause length
+GRASP_BUDGET = 3.0       # s needed for descend + close + clamp
+MAX_ATTEMPTS = 5
 
 
 def parse_order(text):
@@ -487,6 +495,21 @@ def update_tracking():
         float(data.time),
         position[:2],
         updates
+    )
+
+    # Display the Kalman-filter estimate continuously.
+    est = sensor.estimate(RED_LABEL, data.time)
+
+    if est is not None:
+        kalman_position = np.asarray(est["position"])
+        kalman_velocity = np.asarray(est["velocity"])
+
+        print(
+            f"\rTime: {data.time:.2f}s | "
+            f"Kalman position: {np.round(kalman_position, 4)} | "
+            f"Kalman velocity: {np.round(kalman_velocity, 4)}",
+            end="",
+            flush=True
     )
 
 

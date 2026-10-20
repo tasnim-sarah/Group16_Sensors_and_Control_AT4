@@ -264,32 +264,6 @@ class CameraSensor:
 
         return rgb, depth
 
-    # ----------------------------------------------
-    # Latest track of one cube (extrapolated to "now")
-    # ----------------------------------------------
-
-    def estimate(self, label, now):
-        """Filtered position/velocity of a cube extrapolated to time `now`.
-        Returns None if the cube has not been seen recently."""
-
-        f = self.position_filters[label]
-        last = self.last_meas_time[label]
-
-        if last is None or not f.initialized or now - last > self.max_gap:
-            return None
-
-        age = float(now - last)
-
-        return {
-            "position": f.position + f.velocity * age,
-            "velocity": f.velocity,
-            "age": age,
-            "n_updates": f.n_updates,}
-
-    # ----------------------------------------------
-    # Detect cubes and filter their positions
-    # ----------------------------------------------
-
     def detect(self, data, rgb=None, depth=None):
 
         if rgb is None or depth is None:
@@ -464,6 +438,37 @@ class CameraSensor:
                 self.last_meas_time[label] = None
 
         return detections
+    def estimate(self, label, now):
+        """Return the filtered position and velocity of a tracked cube."""
+        if label not in self.position_filters:
+            return None
+
+        kf = self.position_filters[label]
+        last = self.last_meas_time.get(label)
+
+        if last is None or not kf.initialized:
+            return None
+
+        age = max(0.0, float(now) - float(last))
+
+        if age > self.max_gap:
+            return None
+
+        position = kf.position
+        velocity = kf.velocity
+
+        if not np.all(np.isfinite(position)):
+            return None
+
+        if not np.all(np.isfinite(velocity)):
+            return None
+
+        return {
+            "position": position + velocity * age,
+            "velocity": velocity,
+            "age": age,
+            "n_updates": int(kf.n_updates),
+        }
         
 
 
