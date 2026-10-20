@@ -1,4 +1,3 @@
-
 import numpy as np
 import cv2
 import mujoco
@@ -24,116 +23,93 @@ DEFAULT_PICKUP_BOUNDS = (0.24, 0.46, -0.23, 0.23)
 
 
 # --------------------------------------------------
-# 1. LINEAR KALMAN FILTER
+# 1. LINEAR KALMAN FILTER (constant-velocity model, variable time step)
 # --------------------------------------------------
 
 class LinearKalmanFilter3D:
     """
-    Smooths a cube's 3D position.
+    Tracks a cube's 3D position AND velocity.
 
-    State:
-        x, y, z = position in metres
-        vx, vy, vz = velocity in metres/second
+    State:  [x, y, z, vx, vy, vz]   (metres, metres/second)
+    Camera: measures [x, y, z] only.
 
-    The camera measures position.
-    The filter estimates position and velocity.
+    Changes vs. the fixed-rate version:
+      * dt is passed in on every call (simulation time between frames), so the
+        filter stays correct if frames arrive at an irregular rate.
+      * the process noise follows the standard "random acceleration" model,
+        so a cube that starts/stops/reverses is tracked without big lag.
+      * predict() can be used on its own to coast through missed frames.
+
+    Tuning:
+      meas_std  - how noisy the camera position is (m). Lower = trust camera.
+      accel_std - how hard the cube may accelerate (m/s^2). Higher = reacts
+                  faster to starts/stops but gives a noisier velocity.
     """
 
-    def __init__(self, dt=1.0 / 30.0):
-        self.kf = cv2.KalmanFilter(6, 3)
-
-        # Time between measurements
-        self.dt = dt
-
-        # Predict the next position using velocity
-        self.kf.transitionMatrix = np.array([
-            [1, 0, 0, dt, 0, 0],
-            [0, 1, 0, 0, dt, 0],
-            [0, 0, 1, 0, 0, dt],
-            [0, 0, 0, 1, 0, 0],
-            [0, 0, 0, 0, 1, 0],
-            [0, 0, 0, 0, 0, 1],
-        ], dtype=np.float32)
-
-        # Camera measures x, y, z only
-        self.kf.measurementMatrix = np.array([
-            [1, 0, 0, 0, 0, 0],
-            [0, 1, 0, 0, 0, 0],
-            [0, 0, 1, 0, 0, 0],
-        ], dtype=np.float32)
-
-        # How noisy the camera measurements are
-        self.kf.measurementNoiseCov = (
-            np.eye(3, dtype=np.float32) * 0.000025
-        )
-
-        # How much the motion model may be wrong
-        self.kf.processNoiseCov = (
-            np.eye(6, dtype=np.float32) * 0.001
-        )
-
-        # Initial uncertainty
-        self.kf.errorCovPost = (
-            np.eye(6, dtype=np.float32)
-        )
-
+    def __init__(self, meas_std=0.003, accel_std=0.15):
+        self.R = np.eye(3) * meas_std ** 2
+        self.q = accel_std ** 2
+        self.H = np.hstack((np.eye(3), np.zeros((3, 3))))
+        self.x = np.zeros(6)
+        self.P = np.eye(6)
         self.initialized = False
+        self.n_updates = 0
 
-    def update(self, position, dt=None):
-        """Update from a world XYZ measurement using the actual measurement interval."""
-        if dt is not None and np.isfinite(dt) and dt > 1e-4:
-            self.dt = float(np.clip(dt, 1e-3, 0.5))
-            self.kf.transitionMatrix = np.array([
-                [1, 0, 0, self.dt, 0, 0],
-                [0, 1, 0, 0, self.dt, 0],
-                [0, 0, 1, 0, 0, self.dt],
-                [0, 0, 0, 1, 0, 0],
-                [0, 0, 0, 0, 1, 0],
-                [0, 0, 0, 0, 0, 1],
-            ], dtype=np.float32)
-
-        position = np.asarray(position, dtype=np.float32).reshape(3, 1)
-
-        # First measurement initializes the filter
-        if not self.initialized:
-            self.kf.statePost = np.zeros(
-                (6, 1), dtype=np.float32
-            )
-            self.kf.statePost[:3] = position
-            self.initialized = True
-
-            return position.ravel().astype(float)
-
-        # Step 1: predict the next position
-        self.kf.predict()
-
-        # Step 2: correct the prediction using the camera
-        result = self.kf.correct(position)
-
-        # Return the filtered 3D position
-        return result[:3, 0].astype(float)
+    @property
+    def position(self):
+        return self.x[:3].copy()
 
     @property
     def velocity(self):
-        """Estimated world velocity in m/s (zero before initialization)."""
-        if not self.initialized:
-            return np.zeros(3, dtype=float)
-        return self.kf.statePost[3:, 0].astype(float).copy()
+        return self.x[3:].copy()
 
-    def predict_position(self, seconds=0.0):
-        """Predict filtered position seconds into the future without changing state."""
+    def predict(self, dt):
+        """Move the state forward by dt seconds (no measurement)."""
+        dt = max(float(dt), 0.0)
+
+        F = np.eye(6)
+        F[:3, 3:] = np.eye(3) * dt
+
+        Q = np.zeros((6, 6))
+        for i in range(3):
+            Q[i, i] = self.q * dt ** 3 / 3
+            Q[i, i + 3] = Q[i + 3, i] = self.q * dt ** 2 / 2
+            Q[i + 3, i + 3] = self.q * dt
+
+        self.x = F @ self.x
+        self.P = F @ self.P @ F.T + Q
+
+    def update(self, position, dt):
+        """Input a measured [x, y, z] taken dt seconds after the previous one;
+        return the filtered [x, y, z]."""
+        z = np.asarray(position, dtype=float).reshape(3)
+
+        # First measurement initialises the filter
         if not self.initialized:
-            return None
-        seconds = float(max(0.0, seconds))
-        p = self.kf.statePost[:3, 0].astype(float)
-        v = self.velocity
-        return p + v * seconds
+            self.x = np.zeros(6)
+            self.x[:3] = z
+            self.P = np.diag([self.R[0, 0]] * 3 + [1.0] * 3)
+            self.initialized = True
+            self.n_updates = 1
+            return z.copy()
+
+        # Step 1: predict
+        self.predict(dt)
+
+        # Step 2: correct with the camera measurement
+        S = self.H @ self.P @ self.H.T + self.R
+        K = self.P @ self.H.T @ np.linalg.inv(S)
+        self.x = self.x + K @ (z - self.H @ self.x)
+        I_KH = np.eye(6) - K @ self.H
+        self.P = I_KH @ self.P @ I_KH.T + K @ self.R @ K.T   # Joseph form
+        self.n_updates += 1
+
+        return self.position
 
     def reset(self):
         """Start tracking again from a new measurement."""
         self.initialized = False
-        self.kf.statePost = np.zeros((6, 1), dtype=np.float32)
-        self.kf.statePre = np.zeros((6, 1), dtype=np.float32)
+        self.n_updates = 0
 
 
 # --------------------------------------------------
@@ -225,7 +201,8 @@ class CameraSensor:
         renderer,
         camera_name="wrist_cam",
         pickup_bounds=DEFAULT_PICKUP_BOUNDS,
-        min_area=80
+        min_area=80,
+        max_gap=0.6
     ):
         self.model = model
         self.renderer = renderer
@@ -250,12 +227,17 @@ class CameraSensor:
 
         self.kernel = np.ones((3, 3), dtype=np.uint8)
 
-        # Create a separate filter for each cube
+        # One Kalman filter per cube colour
         self.position_filters = {
             label: LinearKalmanFilter3D()
             for label in COLOUR_RANGES
         }
-        self._last_filter_time = {label: None for label in COLOUR_RANGES}
+
+        # Simulation time of the last accepted measurement per colour
+        self.last_meas_time = {label: None for label in COLOUR_RANGES}
+
+        # If a cube is not seen for longer than this, its track is dropped
+        self.max_gap = max_gap
 
     # ----------------------------------------------
     # Capture RGB and depth images
@@ -283,6 +265,28 @@ class CameraSensor:
         return rgb, depth
 
     # ----------------------------------------------
+    # Latest track of one cube (extrapolated to "now")
+    # ----------------------------------------------
+
+    def estimate(self, label, now):
+        """Filtered position/velocity of a cube extrapolated to time `now`.
+        Returns None if the cube has not been seen recently."""
+
+        f = self.position_filters[label]
+        last = self.last_meas_time[label]
+
+        if last is None or not f.initialized or now - last > self.max_gap:
+            return None
+
+        age = float(now - last)
+
+        return {
+            "position": f.position + f.velocity * age,
+            "velocity": f.velocity,
+            "age": age,
+            "n_updates": f.n_updates,}
+
+    # ----------------------------------------------
     # Detect cubes and filter their positions
     # ----------------------------------------------
 
@@ -290,6 +294,8 @@ class CameraSensor:
 
         if rgb is None or depth is None:
             rgb, depth = self.capture(data)
+
+        now = float(data.time)
 
         hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
 
@@ -426,20 +432,40 @@ class CameraSensor:
                     raw_position.copy()
                 )
 
-                # Apply this colour's own Kalman filter
-                previous_time = self._last_filter_time[label]
-                now = float(data.time)
-                measured_dt = (now - previous_time) if previous_time is not None else 1.0 / 30.0
-                tracker = self.position_filters[label]
-                filtered_position = tracker.update(raw_position, measured_dt)
-                self._last_filter_time[label] = now
+                # Time since this cube was last measured
+                kf = self.position_filters[label]
+                last = self.last_meas_time[label]
 
+                if last is not None and now - last > self.max_gap:
+                    kf.reset()          # stale track: start again
+                    last = None
+
+                dt = 0.0 if last is None else now - last
+
+                # Apply this colour's own Kalman filter
+                filtered_position = kf.update(raw_position, dt)
+
+                self.last_meas_time[label] = now
+
+                # Make filtered position + velocity available to the robot
                 detection["position_world_m"] = filtered_position
-                detection["velocity_world_mps"] = tracker.velocity
-                detection["predicted_position_world_m"] = tracker.predict_position(0.10)
+                detection["velocity_world_mps"] = kf.velocity
+                detection["n_updates"] = kf.n_updates
+
                 detections[label] = detection
 
+        # Drop tracks of cubes that have not been seen for a while
+        for label in COLOUR_RANGES:
+            if label in detections:
+                continue
+            last = self.last_meas_time[label]
+            if last is not None and now - last > self.max_gap:
+                self.position_filters[label].reset()
+                self.last_meas_time[label] = None
+
         return detections
+        
+
 
 
 # --------------------------------------------------
