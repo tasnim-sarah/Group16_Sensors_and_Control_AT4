@@ -4,48 +4,57 @@ import cv2
 import mujoco
 
 
-# HSV colour ranges for cube detection
+# --------------------------------------------------
+# 1. COLOURS TO DETECT
+# --------------------------------------------------
+
 COLOUR_RANGES = {
     "Red Cube": [
         ([0, 130, 100], [10, 255, 255]),
         ([170, 130, 100], [179, 255, 255]),
     ],
+
     "Yellow Cube": [
         ([22, 180, 150], [38, 255, 255]),
     ],
+
     "Blue Cube": [
         ([100, 170, 90], [130, 255, 255]),
     ],
-}
 
-# Pickup workspace in world metres
-# xmin, xmax, ymin, ymax
-DEFAULT_PICKUP_BOUNDS = (0.24, 0.46, -0.23, 0.23)
+    # New: tray colours
+    "Pink Tray": [
+        ([145, 60, 60], [179, 255, 255]),
+    ],
+
+    "Green Tray": [
+        ([35, 50, 40], [90, 255, 255]),
+    ],
+
+    # Black has low brightness.
+    # Shadows and other dark objects may also match.
+    "Purple Tray": [
+      ([128, 80, 50], [146, 255, 255]),
+    ]}
 
 
 # --------------------------------------------------
-# 1. LINEAR KALMAN FILTER
+# 2. SIMPLE 3D KALMAN FILTER
 # --------------------------------------------------
 
 class LinearKalmanFilter3D:
     """
-    Smooths a cube's 3D position.
+    Smooths an object's 3D position.
 
     State:
         x, y, z = position in metres
         vx, vy, vz = velocity in metres/second
-
-    The camera measures position.
-    The filter estimates position and velocity.
     """
 
     def __init__(self, dt=1.0 / 30.0):
         self.kf = cv2.KalmanFilter(6, 3)
 
-        # Time between measurements
-        self.dt = dt
-
-        # Predict the next position using velocity
+        # Predict position using velocity.
         self.kf.transitionMatrix = np.array([
             [1, 0, 0, dt, 0, 0],
             [0, 1, 0, 0, dt, 0],
@@ -55,63 +64,60 @@ class LinearKalmanFilter3D:
             [0, 0, 0, 0, 0, 1],
         ], dtype=np.float32)
 
-        # Camera measures x, y, z only
+        # The camera measures position, not velocity.
         self.kf.measurementMatrix = np.array([
             [1, 0, 0, 0, 0, 0],
             [0, 1, 0, 0, 0, 0],
             [0, 0, 1, 0, 0, 0],
         ], dtype=np.float32)
 
-        # How noisy the camera measurements are
+        # Camera measurement uncertainty.
         self.kf.measurementNoiseCov = (
             np.eye(3, dtype=np.float32) * 0.000025
         )
 
-        # How much the motion model may be wrong
+        # Motion prediction uncertainty.
         self.kf.processNoiseCov = (
             np.eye(6, dtype=np.float32) * 0.001
         )
 
-        # Initial uncertainty
-        self.kf.errorCovPost = (
-            np.eye(6, dtype=np.float32)
+        self.kf.errorCovPost = np.eye(
+            6, dtype=np.float32
         )
 
         self.initialized = False
 
     def update(self, position):
-        """Input a measured [x, y, z]; return filtered [x, y, z]."""
+        """Input measured [x, y, z]; return filtered position."""
 
         position = np.asarray(
             position, dtype=np.float32
         ).reshape(3, 1)
 
-        # First measurement initializes the filter
+        # Start with the first camera measurement.
         if not self.initialized:
             self.kf.statePost = np.zeros(
                 (6, 1), dtype=np.float32
             )
+
             self.kf.statePost[:3] = position
             self.initialized = True
 
-            return position.ravel().astype(float)
+            return position.flatten().astype(float)
 
-        # Step 1: predict the next position
+        # Predict the position, then correct it using the camera.
         self.kf.predict()
-
-        # Step 2: correct the prediction using the camera
         result = self.kf.correct(position)
 
-        # Return the filtered 3D position
         return result[:3, 0].astype(float)
 
     def reset(self):
-        """Start tracking again from a new measurement."""
+        """Reinitialise when starting a new tracking session."""
         self.initialized = False
 
 
 # --------------------------------------------------
-# 2. WRIST CAMERA SETUP
+# 3. WRIST CAMERA SETUP
 # --------------------------------------------------
 
 def add_wrist_camera(spec):
@@ -138,7 +144,7 @@ def aim_camera_once(
     target_world=(0.35, -0.05, 0.03),
     camera_name="wrist_cam"
 ):
-    """Aim the camera once when configuring the scene."""
+    """Aim the camera at a target once during setup."""
 
     mujoco.mj_forward(model, data)
 
@@ -154,7 +160,6 @@ def aim_camera_once(
         raise ValueError("Camera and target positions coincide")
 
     forward /= norm
-
     z_axis = -forward
 
     reference = np.array([0., 0., 1.])
@@ -188,7 +193,7 @@ def aim_camera_once(
 
 
 # --------------------------------------------------
-# 3. CAMERA SENSOR
+# 4. CAMERA SENSOR
 # --------------------------------------------------
 
 class CameraSensor:
@@ -198,7 +203,6 @@ class CameraSensor:
         model,
         renderer,
         camera_name="wrist_cam",
-        pickup_bounds=DEFAULT_PICKUP_BOUNDS,
         min_area=80
     ):
         self.model = model
@@ -210,7 +214,7 @@ class CameraSensor:
         self.height = int(renderer.height)
         self.width = int(renderer.width)
 
-        # Camera focal length in pixels
+        # Camera focal length in pixels.
         fovy = np.deg2rad(model.cam_fovy[self.cam_id])
 
         self.fy = self.height / (2.0 * np.tan(fovy / 2.0))
@@ -219,20 +223,18 @@ class CameraSensor:
         self.cx = (self.width - 1) / 2.0
         self.cy = (self.height - 1) / 2.0
 
-        self.pickup_bounds = pickup_bounds
         self.min_area = min_area
-
         self.kernel = np.ones((3, 3), dtype=np.uint8)
 
-        # Create a separate filter for each cube
+        # Each cube and tray gets its own Kalman filter.
         self.position_filters = {
             label: LinearKalmanFilter3D()
             for label in COLOUR_RANGES
         }
 
-    # ----------------------------------------------
+    # --------------------------------------------------
     # Capture RGB and depth images
-    # ----------------------------------------------
+    # --------------------------------------------------
 
     def capture(self, data):
 
@@ -248,6 +250,7 @@ class CameraSensor:
             self.renderer.update_scene(
                 data, camera=self.camera_name
             )
+
             depth = self.renderer.render().copy()
 
         finally:
@@ -255,9 +258,9 @@ class CameraSensor:
 
         return rgb, depth
 
-    # ----------------------------------------------
-    # Detect cubes and filter their positions
-    # ----------------------------------------------
+    # --------------------------------------------------
+    # Detect cubes and trays
+    # --------------------------------------------------
 
     def detect(self, data, rgb=None, depth=None):
 
@@ -266,25 +269,23 @@ class CameraSensor:
 
         hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
 
-        # Current camera position and orientation in world coordinates
+        # Camera pose in world coordinates.
         cam_pos = data.cam_xpos[self.cam_id].copy()
 
         R_wc = data.cam_xmat[self.cam_id].reshape(
             3, 3
         ).copy()
 
-        xmin, xmax, ymin, ymax = self.pickup_bounds
-
         detections = {}
 
-        # Process each cube colour separately
+        # Detect each cube and tray separately.
         for label, ranges in COLOUR_RANGES.items():
 
             mask = np.zeros(
                 hsv.shape[:2], dtype=np.uint8
             )
 
-            # Find pixels matching this colour
+            # Find pixels matching the object's colour.
             for lo, hi in ranges:
                 mask |= cv2.inRange(
                     hsv,
@@ -292,7 +293,7 @@ class CameraSensor:
                     np.array(hi, dtype=np.uint8)
                 )
 
-            # Remove noise and fill small gaps
+            # Remove small noise and fill small gaps.
             mask = cv2.morphologyEx(
                 mask, cv2.MORPH_OPEN, self.kernel
             )
@@ -313,10 +314,13 @@ class CameraSensor:
 
                 area = cv2.contourArea(contour)
 
-                if not (
-                    self.min_area <= area
-                    <= self.width * self.height * 0.10
-                ):
+                # Trays may cover more image area than cubes.
+                if label.endswith("Tray"):
+                    max_area = self.width * self.height * 0.35
+                else:
+                    max_area = self.width * self.height * 0.10
+
+                if not self.min_area <= area <= max_area:
                     continue
 
                 moments = cv2.moments(contour)
@@ -324,11 +328,11 @@ class CameraSensor:
                 if moments["m00"] <= 0:
                     continue
 
-                # Centre of the detected object in the image
+                # Centre of the detected object in the image.
                 u = moments["m10"] / moments["m00"]
                 v = moments["m01"] / moments["m00"]
 
-                # Use the interior of the contour for depth
+                # Use the inside of the detected object for depth.
                 selected = np.zeros(
                     mask.shape, dtype=np.uint8
                 )
@@ -346,6 +350,7 @@ class CameraSensor:
 
                 depths = depth[interior > 0]
 
+                # Ignore invalid depth values.
                 valid = depths[
                     np.isfinite(depths) & (depths > 0)
                 ]
@@ -353,27 +358,21 @@ class CameraSensor:
                 if valid.size < 10:
                     continue
 
-                # Median depth reduces the influence of outliers
+                # Median depth reduces the effect of outliers.
                 d = float(np.median(valid))
 
-                # Convert pixel coordinates into camera coordinates
+                # Convert image pixels to camera coordinates.
                 p_cam = np.array([
                     (u - self.cx) * d / self.fx,
                     -(v - self.cy) * d / self.fy,
                     -d
                 ])
 
-                # Convert camera coordinates into world coordinates
+                # Convert camera coordinates to world coordinates.
                 p_world = R_wc @ p_cam + cam_pos
 
-                # Reject detections outside the pickup workspace
-                if not (
-                    xmin <= p_world[0] <= xmax
-                    and ymin <= p_world[1] <= ymax
-                ):
-                    continue
-
                 candidates.append((area, {
+                    "name": label,
                     "pixel": (float(u), float(v)),
                     "depth_m": d,
                     "position_world_m": p_world.copy(),
@@ -382,7 +381,7 @@ class CameraSensor:
                     "contour": contour,
                 }))
 
-            # Keep the largest valid contour for each colour
+            # Keep the largest valid detection of each colour.
             if candidates:
 
                 detection = max(
@@ -390,7 +389,7 @@ class CameraSensor:
                     key=lambda item: item[0]
                 )[1]
 
-                # Save the original, unfiltered position
+                # Save the original camera measurement.
                 raw_position = detection[
                     "position_world_m"
                 ].copy()
@@ -399,14 +398,13 @@ class CameraSensor:
                     raw_position.copy()
                 )
 
-                # Apply this colour's own Kalman filter
+                # Smooth the position with its own Kalman filter.
                 filtered_position = (
                     self.position_filters[label].update(
                         raw_position
                     )
                 )
 
-                # Make the filtered position available to the robot
                 detection["position_world_m"] = (
                     filtered_position
                 )
@@ -417,9 +415,13 @@ class CameraSensor:
 
 
 # --------------------------------------------------
-# 4. SELECT A TARGET
+# 5. SELECT A DETECTED OBJECT
 # --------------------------------------------------
 
-def selected_target(detections, colour):
-    label = f"{colour.strip().capitalize()} Cube"
-    return detections.get(label)
+def selected_target(detections, name):
+    """
+    Examples:
+        selected_target(detections, "Red Cube")
+        selected_target(detections, "Pink Tray")
+    """
+    return detections.get(name)

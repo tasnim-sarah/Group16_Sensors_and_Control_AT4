@@ -1,14 +1,17 @@
-
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
- 
+
 import cv2
 import mujoco
 import mujoco.viewer
 import numpy as np
 from camera_module import CameraSensor, aim_camera_once
+import platform
+
+IS_MAC = platform.system() == "Darwin"
  
 # Scene names. If your XML uses different names, change them here.
 COLOURS = {
@@ -17,8 +20,8 @@ COLOURS = {
     'y': dict(name='yellow', cube='yellow_cube', bin='yellow_bin',
               drop='yellow_bin_drop'),
 }
- 
- 
+
+
 def parse_order(text):
     """'r b y', 'rby', 'red, blue' ... -> ['r', 'b', 'y'] (None if invalid)."""
     words = {'r': 'r', 'red': 'r', 'b': 'b', 'blue': 'b', 'y': 'y', 'yellow': 'y'}
@@ -33,8 +36,8 @@ def parse_order(text):
     if not order or len(set(order)) != len(order):
         return None
     return order
- 
- 
+
+
 def ask_order():
     if len(sys.argv) > 1:
         order = parse_order(' '.join(sys.argv[1:]))
@@ -50,16 +53,16 @@ def ask_order():
         if order:
             return order
         print('  Use r, b and/or y, each at most once (for example: r b y).')
- 
- 
+
+
 ORDER = ask_order()
 print('Pick order:', ' -> '.join(COLOURS[k]['name'] for k in ORDER))
- 
+
 HERE = Path(__file__).resolve().parent
 spec = mujoco.MjSpec.from_file(str(HERE / 'universal_robots_ur3e' / 'pick_scene.xml'))
 for key in list(spec.keys):
     spec.delete(key)
- 
+
 wrist = spec.body('wrist_3_link')
 wrist.add_geom(name='camera_shell', type=mujoco.mjtGeom.mjGEOM_BOX,
                size=[.045, .0125, .0125], pos=[0, .08, .05],
@@ -67,20 +70,20 @@ wrist.add_geom(name='camera_shell', type=mujoco.mjtGeom.mjGEOM_BOX,
 cam = wrist.add_camera(name='wrist_cam', pos=[.0325, .095, .05], fovy=51.28)
 cam.alt.type = mujoco.mjtOrientation.mjORIENTATION_XYAXES
 cam.alt.xyaxes = [1, 0, 0, 0, 0, 1]
- 
+
 g = wrist.add_body(name='gripper_base', pos=[0, .09215, 0])
 g.alt.type = mujoco.mjtOrientation.mjORIENTATION_XYAXES
 g.alt.xyaxes = [0, 0, 1, 1, 0, 0]
 g.add_geom(name='palm', type=mujoco.mjtGeom.mjGEOM_BOX,
            size=[.02, .05, .01], pos=[0, 0, .01], mass=.25,
            rgba=[.2, .2, .2, 1], contype=1, conaffinity=1, group=0)
- 
+
 FINGER_TRAVEL = .030     # per-finger stroke (m)
 FINGER_OFFSET = .040     # finger centre distance from gripper axis when open (m)
 KP_GRIP = 400.0          # N/m per finger
 SQUEEZE_FORCE = 5.0      # N per finger once contact is confirmed
 MAX_GRIP_FORCE = 30.0
- 
+
 for side, sign in [('left', 1), ('right', -1)]:
     f = g.add_body(name=f'finger_{side}', pos=[0, sign * FINGER_OFFSET, .04])
     f.add_joint(name=f'finger_{side}', type=mujoco.mjtJoint.mjJNT_SLIDE,
@@ -91,7 +94,7 @@ for side, sign in [('left', 1), ('right', -1)]:
                friction=[3.0, .01, .001], condim=4,
                contype=1, conaffinity=1, group=0)
 g.add_site(name='tcp', pos=[0, 0, .045], size=[.006, 0, 0], rgba=[1, 0, 1, 1])
- 
+
 # One actuator per finger: with equal targets the cube self-centres between
 # the pads and both pads push equally.
 for side in ('left', 'right'):
@@ -100,12 +103,12 @@ for side in ('left', 'right'):
     act.set_to_position(kp=KP_GRIP)
     act.ctrlrange = [0, FINGER_TRAVEL]
     act.forcerange = [-MAX_GRIP_FORCE, MAX_GRIP_FORCE]
- 
+
 model = spec.compile()
 # Stiffer friction handling for grasping (reduces creep/slip at the pads).
 model.opt.cone = mujoco.mjtCone.mjCONE_ELLIPTIC
 model.opt.impratio = 10
- 
+
 TCP = model.site('tcp').id
 CAM = model.camera('wrist_cam').id
 joint_ids = [model.joint(n).id for n in
@@ -117,7 +120,7 @@ q_min = np.array([model.jnt_range[j, 0] if model.jnt_limited[j] else -2*np.pi
                   for j in joint_ids])
 q_max = np.array([model.jnt_range[j, 1] if model.jnt_limited[j] else 2*np.pi
                   for j in joint_ids])
- 
+
 # ---- Arm sag fix --------------------------------------------------------
 ARM_GRAVITY_COMP = True  # Keep enabled: compensates arm/gripper weight.
 if ARM_GRAVITY_COMP:
@@ -131,7 +134,7 @@ if ARM_GRAVITY_COMP:
             model.body_gravcomp[b] = 1.0
             comp_count += 1
     print(f'Gravity compensation on for {comp_count} arm/gripper bodies.')
- 
+
 data = mujoco.MjData(model)
 HOME = np.array([-1.5708, -1.5708, 1.5708, -1.5708, -1.5708, 0.])
 data.qpos[:6] = HOME
@@ -145,15 +148,15 @@ for name, (x0, x1, y0, y1) in zip(
     adr = int(model.jnt_qposadr[model.joint(name).id])
     data.qpos[adr:adr+2] = [rng.uniform(x0, x1), rng.uniform(y0, y1)]
 GRIP_IDS = [model.actuator('gripper_left').id, model.actuator('gripper_right').id]
- 
- 
+
+
 def set_grip(target):
     data.ctrl[GRIP_IDS] = target
- 
- 
+
+
 set_grip(0.)
 mujoco.mj_forward(model, data)
- 
+
 print('Camera alignment:', round(aim_camera_once(model, data), 5))
 renderer = mujoco.Renderer(model, width=640, height=480)
 try:
@@ -161,8 +164,8 @@ try:
 except Exception:
     renderer.close()
     raise
- 
- 
+
+
 def detect_all(show=False):
     """RGB-D detection of every cube from the current (home) camera pose."""
     rgb, depth = sensor.capture(data)
@@ -174,28 +177,35 @@ def detect_all(show=False):
             cv2.drawContours(annotated, [item['contour']], -1, (0, 255, 0), 2)
             cv2.putText(annotated, label, (max(0, int(u)-50), max(20, int(v)-12)),
                         cv2.FONT_HERSHEY_SIMPLEX, .5, (255, 255, 255), 1)
-        cv2.imshow('RGB-D detection (press any key)',
-                   cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR))
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+        bgr = cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR)
+        if IS_MAC:
+            # No cv2 windows off the main thread on macOS: save and open in Preview.
+            out = HERE / 'detection.png'
+            cv2.imwrite(str(out), bgr)
+            print(f'Detection image saved to {out} (opening in Preview)')
+            subprocess.run(['open', str(out)], check=False)
+        else:
+            cv2.imshow('RGB-D detection (press any key)', bgr)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
     return found
- 
- 
+
+
 try:
     detections = detect_all(show=True)
 except Exception:
     renderer.close()
     raise
 print('Detected:', list(detections))
- 
- 
+
+
 def find_detection(found, colour):
     for label, item in found.items():
         if label.lower().startswith(colour['name']):
             return item
     return None
- 
- 
+
+
 CUBE_CENTER_Z = 0.021  # 40 mm cube resting on tabletop Z=0, ~1 mm clearance
 # Finger pad centres are at gripper local Z=.040, TCP at Z=.045. With +Z
 # pointing down, the pad centre sits 5 mm ABOVE the TCP in world.
@@ -207,19 +217,32 @@ GRASP_POSITION_TOL = .0035
 GRASP_ORIENTATION_TOL = .07
 ALIGN_TO_CUBE_AXES = True  # snap gripper closing axis to world X or Y
 MIN_CAMERA_Z = .025   # Safety check on camera position only; NOT full collision detection.
- 
+
 # Live wrist-camera monitor (uses the actual MuJoCo camera attached to wrist_3_link).
+# Windows/Linux: separate OpenCV window.
+# macOS: the MuJoCo viewer itself is switched to look through the wrist camera.
 LIVE_WINDOW = 'LIVE wrist_cam  |  press Q to stop camera and simulation'
 CAMERA_FPS = 12
 last_camera_frame = 0.0
 camera_window_open = False
 stop_requested = False
- 
- 
+ACTIVE_VIEWER = None     # set once the viewer is launched (used on macOS)
+viewer_cam_set = False
+
+
 def update_live_camera(force=False):
-    global last_camera_frame, camera_window_open, stop_requested
+    global last_camera_frame, camera_window_open, stop_requested, viewer_cam_set
     if stop_requested:
         return False
+
+    if IS_MAC:
+        if ACTIVE_VIEWER is not None and not viewer_cam_set:
+            with ACTIVE_VIEWER.lock():
+                ACTIVE_VIEWER.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
+                ACTIVE_VIEWER.cam.fixedcamid = CAM
+            viewer_cam_set = True
+        return True
+
     now = time.monotonic()
     if not force and now - last_camera_frame < 1.0 / CAMERA_FPS:
         return True
@@ -236,7 +259,7 @@ def update_live_camera(force=False):
             return True
         cv2.namedWindow(LIVE_WINDOW, cv2.WINDOW_NORMAL)
         camera_window_open = True
- 
+
     renderer.update_scene(data, camera='wrist_cam')
     rgb = renderer.render()
     frame = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
@@ -249,13 +272,14 @@ def update_live_camera(force=False):
         stop_requested = True
         return False
     return True
- 
- 
+
+
 def cleanup_camera():
     renderer.close()
-    cv2.destroyAllWindows()
- 
- 
+    if not IS_MAC:
+        cv2.destroyAllWindows()
+
+
 def step_hold(viewer, duration):
     for _ in range(max(1, int(duration / model.opt.timestep))):
         if not viewer.is_running():
@@ -265,20 +289,20 @@ def step_hold(viewer, duration):
         if not update_live_camera():
             return False
     return True
- 
- 
+
+
 class PickFailed(Exception):
     pass
- 
- 
+
+
 def need(condition, message):
     if not condition:
         raise PickFailed(message)
- 
- 
+
+
 def down_orientation(rot90=False, verbose=False):
     """Target TCP rotation with local +Z pointing vertically down.
- 
+
     The horizontal heading of the TCP X axis is kept and snapped to the nearest
     world axis so the closing axis (TCP Y) is parallel to the cube faces.
     rot90=True turns the gripper a further 90 deg about vertical, which swaps
@@ -305,18 +329,18 @@ def down_orientation(rot90=False, verbose=False):
     y /= np.linalg.norm(y)
     x = np.cross(y, z)
     return np.column_stack((x, y, z))
- 
- 
+
+
 def rotation_error(current, desired):
     """World-frame orientation error vector for a geometric angular Jacobian."""
     return 0.5 * (np.cross(current[:, 0], desired[:, 0])
                   + np.cross(current[:, 1], desired[:, 1])
                   + np.cross(current[:, 2], desired[:, 2]))
- 
- 
+
+
 def servo_tick(ref, v_ref, R_target, q_cmd, dt, kp_pos=4.0, kp_rot=1.5):
     """One damped-Jacobian control tick tracking a moving reference point.
- 
+
     v_ref is the reference velocity (feed-forward) so the arm does not lag
     behind a moving target. q_cmd persists between ticks (no reset to the
     measured joints), so the arm never brakes between points.
@@ -336,8 +360,8 @@ def servo_tick(ref, v_ref, R_target, q_cmd, dt, kp_pos=4.0, kp_rot=1.5):
     q_cmd = np.clip(q_cmd + dq * dt, q_min, q_max)
     data.ctrl[:6] = q_cmd
     return q_cmd, float(np.linalg.norm(pos_err)), float(np.linalg.norm(ori_err))
- 
- 
+
+
 def hold_tcp_pose(viewer, duration, xyz, R_target):
     """Actively hold the TCP pose during finger closing/contact settling."""
     dt = .02
@@ -349,12 +373,12 @@ def hold_tcp_pose(viewer, duration, xyz, R_target):
         if not step_hold(viewer, dt):
             return False
     return True
- 
- 
+
+
 def move_smooth(viewer, target_xyz, R_target, label, avg_speed=.10,
                 min_time=.8, settle_tol=.005, settle_time=3.0):
     """Continuous straight-line move with a minimum-jerk speed profile.
- 
+
     One smooth motion (no stop-start between waypoints). Also turns the tool
     to R_target and only reports success once position AND orientation agree.
     """
@@ -390,8 +414,8 @@ def move_smooth(viewer, target_xyz, R_target, label, avg_speed=.10,
             return False
     print(f'  FAILED to settle: XYZ error {err:.4f} m, orientation error {ori:.3f}')
     return False
- 
- 
+
+
 def go_home(viewer):
     """Smooth joint-space return to the start pose (swings round the base)."""
     q0 = np.array(data.qpos[qadr])
@@ -405,21 +429,21 @@ def go_home(viewer):
         if not step_hold(viewer, dt):
             return False
     return step_hold(viewer, .8)
- 
- 
+
+
 # ---- Per-cube state (ground truth used ONLY for validation printouts) ----
 CUBE_BODY = CUBE_GEOM = BIN_DROP = BIN_BODY = None
 INITIAL_CUBE_Z = 0.0
- 
- 
+
+
 def lookup(kind, name):
     try:
         return int(getattr(model, kind)(name).id)
     except Exception:
         raise SystemExit(f"The scene has no {kind} called '{name}'. "
                          f"Check pick_scene.xml and the COLOURS table at the top.")
- 
- 
+
+
 def select_cube(colour):
     global CUBE_BODY, CUBE_GEOM, BIN_DROP, BIN_BODY, INITIAL_CUBE_Z
     CUBE_BODY = lookup('body', colour['cube'])
@@ -431,15 +455,15 @@ def select_cube(colour):
     print(f'Cube mass={model.body_mass[CUBE_BODY]:.3f} kg, '
           f'friction={np.round(model.geom_friction[CUBE_GEOM], 3)}, '
           f'size={np.round(model.geom_size[CUBE_GEOM], 4)}')
- 
- 
+
+
 def carried_cube_state():
     mujoco.mj_forward(model, data)
     cube_pos = data.xpos[CUBE_BODY].copy()
     tcp_pos = data.site_xpos[TCP].copy()
     return cube_pos, float(np.linalg.norm(cube_pos[:2] - tcp_pos[:2]))
- 
- 
+
+
 def finger_contacts():
     """Count cube-pad contacts reported by MuJoCo contact solver."""
     pad_ids = {model.geom('finger_left_pad').id, model.geom('finger_right_pad').id}
@@ -449,8 +473,8 @@ def finger_contacts():
         if CUBE_GEOM in ids:
             touching.update(ids & pad_ids)
     return len(touching)
- 
- 
+
+
 def geom_label(gid):
     name = model.geom(gid).name
     if name:
@@ -458,8 +482,8 @@ def geom_label(gid):
     body = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY,
                              int(model.geom_bodyid[gid]))
     return f'{body}:geom{gid}'
- 
- 
+
+
 def print_pad_contacts():
     """List EVERYTHING touching a finger pad (cube, table, other objects)."""
     pad_ids = {model.geom('finger_left_pad').id, model.geom('finger_right_pad').id}
@@ -472,8 +496,8 @@ def print_pad_contacts():
                   f'dist={float(c.dist):.4f} m')
     if not seen:
         print('    pad contact: none')
- 
- 
+
+
 def print_gripper_diagnostics(stage):
     mujoco.mj_forward(model, data)
     left = data.geom_xpos[model.geom('finger_left_pad').id].copy()
@@ -494,8 +518,8 @@ def print_gripper_diagnostics(stage):
     print(f'  TRUE cube - pad midpoint = {np.round(cube_offset, 4)} m; '
           f'along closing axis = {float(np.dot(cube_offset, closing_axis))*1000:.1f} mm')
     print_pad_contacts()
- 
- 
+
+
 def close_until_cube_contact(viewer, hold_xyz, hold_R):
     """Ramp both finger targets until BOTH pads touch the cube, then squeeze."""
     l_adr = int(model.jnt_qposadr[model.joint('finger_left').id])
@@ -530,8 +554,8 @@ def close_until_cube_contact(viewer, hold_xyz, hold_R):
     print('  STOP: fingers reached full travel without two-sided contact.')
     print_gripper_diagnostics('At full travel')
     return False
- 
- 
+
+
 def check_carry(stage, min_rise=.020, max_xy_offset=.028, max_rel_z=.040):
     cube_xyz, xy_error = carried_cube_state()
     mujoco.mj_forward(model, data)
@@ -549,12 +573,12 @@ def check_carry(stage, min_rise=.020, max_xy_offset=.028, max_rel_z=.040):
         print('  STOP: both pads must still contact the cube during carry.')
         return False
     return True
- 
- 
+
+
 def in_pickup_area(c):
     return .24 <= c[0] <= .46 and -.23 <= c[1] <= .23 and -.01 <= c[2] <= .07
- 
- 
+
+
 def choose_rot90(target_xy, others_xy):
     """Closing axis is world X by default. Switch to Y if another cube sits in
     the swept area of the open jaws (jaws reach ~46 mm each side of centre)."""
@@ -567,11 +591,11 @@ def choose_rot90(target_xy, others_xy):
                 count += 1
         return count
     return conflicts('y') < conflicts('x')
- 
- 
+
+
 def pick_and_place(viewer, colour, detection, others_xy):
     """Pick one cube from its RGB-D detection and drop it in its own bin.
- 
+
     Raises PickFailed if any safety check fails. Returns True if the cube
     ended up inside the bin (ground-truth check, evaluation only).
     """
@@ -583,7 +607,7 @@ def pick_and_place(viewer, colour, detection, others_xy):
     print('Surface XYZ (RGB-D):', np.round(visible_xyz, 4))
     print('Approx. grasp center XYZ:', np.round(center, 4))
     need(in_pickup_area(center), 'RGB-D target outside the pickup area')
- 
+
     rot90 = choose_rot90(center[:2], others_xy)
     if rot90:
         print('Another cube is close along the jaw axis: closing along world Y.')
@@ -592,7 +616,7 @@ def pick_and_place(viewer, colour, detection, others_xy):
     grasp[2] += GRASP_Z_OFFSET
     hover = grasp.copy()
     hover[2] += HOVER_ABOVE_CUBE
- 
+
     set_grip(0.)
     mujoco.mj_forward(model, data)
     start_xyz = data.site_xpos[TCP].copy()
@@ -603,7 +627,7 @@ def pick_and_place(viewer, colour, detection, others_xy):
     need(move_smooth(viewer, grasp, target_R, 'Descend', avg_speed=.06,
                      min_time=1.5, settle_tol=GRASP_POSITION_TOL),
          'could not descend accurately')
- 
+
     mujoco.mj_forward(model, data)
     for pad in ('finger_left_pad', 'finger_right_pad'):
         gid = model.geom(pad).id
@@ -613,13 +637,13 @@ def pick_and_place(viewer, colour, detection, others_xy):
         lowest = float(data.geom_xpos[gid, 2] - z_extent)
         print(f'  {pad}: lowest point Z={lowest:.4f} m')
         need(lowest >= .006, 'finger pad too close to / below tabletop')
- 
+
     print_gripper_diagnostics('Before closing')
     grasp_hold_xyz = data.site_xpos[TCP].copy()
     print('Holding TCP at', np.round(grasp_hold_xyz, 4), 'while closing')
     need(close_until_cube_contact(viewer, grasp_hold_xyz, target_R),
          'stable two-sided contact was not confirmed (no lift attempted)')
- 
+
     # Gentle slip test, then clear the table. Smooth continuous motions.
     lift_xy = grasp_hold_xyz[:2].copy()
     test_lift_z = float(grasp_hold_xyz[2]) + .065
@@ -632,7 +656,7 @@ def pick_and_place(viewer, colour, detection, others_xy):
     need(move_smooth(viewer, [lift_xy[0], lift_xy[1], TRANSFER_HEIGHT], target_R,
                      'Clear table', avg_speed=.10), 'cannot reach transport height')
     need(check_carry('Before transfer', min_rise=.065), 'cube lost before transfer')
- 
+
     mujoco.mj_forward(model, data)
     bin_xyz = data.site_xpos[BIN_DROP].copy()
     print(f'{colour["name"].capitalize()} bin drop site (known fixture):',
@@ -646,7 +670,7 @@ def pick_and_place(viewer, colour, detection, others_xy):
                      'Lower over bin', avg_speed=.08, min_time=1.0),
          'release height unreachable')
     need(check_carry('Before release', min_rise=.040), 'cube lost before release')
- 
+
     print('Opening gripper above bin...')
     set_grip(0.0)
     need(step_hold(viewer, 1.5), 'viewer closed')
@@ -654,7 +678,7 @@ def pick_and_place(viewer, colour, detection, others_xy):
                        target_R, 'Retreat', avg_speed=.12):
         print('Warning: released cube but retreat did not finish.')
     need(step_hold(viewer, .8), 'viewer closed')
- 
+
     mujoco.mj_forward(model, data)
     final_cube = data.xpos[CUBE_BODY].copy()
     final_bin = data.xpos[BIN_BODY].copy()
@@ -666,14 +690,15 @@ def pick_and_place(viewer, colour, detection, others_xy):
     print(f'PLACEMENT CHECK ({colour["name"]}):',
           'PASS' if placed else 'NOT CONFIRMED: cube may have missed bin')
     return placed
- 
- 
+
+
 results = {}
 try:
     with mujoco.viewer.launch_passive(model, data) as viewer:
+        ACTIVE_VIEWER = viewer  # used by update_live_camera on macOS
         if not step_hold(viewer, 1.0):
             raise SystemExit('Viewer closed.')
- 
+
         for index, key in enumerate(ORDER):
             colour = COLOURS[key]
             item = find_detection(detections, colour)
@@ -702,7 +727,7 @@ try:
                     break
                 detections = detect_all()
                 print('Detected:', list(detections))
- 
+
         print('\n=== SUMMARY ===')
         for key in ORDER:
             state = results.get(key)
@@ -710,7 +735,7 @@ try:
                     'put down but bin not confirmed' if state is False else
                     'not done')
             print(f'  {COLOURS[key]["name"]:>6}: {text}')
- 
+
         while viewer.is_running():
             mujoco.mj_step(model, data)
             viewer.sync()
