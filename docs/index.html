@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vision-Guided Pick and Place – Group 16</title>
+  <meta name="description" content="UR3e vision-guided pick and place in MuJoCo using only estimated state. 41014 Sensors and Control, Group 16.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;600;700&family=Castoro&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --text: #222;
+      --muted: #666;
+      --bg: #fff;
+      --soft: #f5f6f8;
+      --line: #e3e5e8;
+      --accent: #1f5fbf;
+      --btn: #363636;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: 'Noto Sans', system-ui, sans-serif; line-height: 1.6;
+    }
+    .wrap { max-width: 900px; margin: 0 auto; padding: 0 16px; }
+    header { text-align: center; padding: 56px 0 24px; }
+    h1 { font-family: 'Castoro', serif; font-weight: 400; font-size: clamp(1.9rem, 5vw, 2.8rem); line-height: 1.2; margin: 0 0 16px; }
+    .authors { font-size: 1.1rem; margin: 0 0 4px; }
+    .authors span { display: inline-block; margin: 0 10px; color: var(--accent); }
+    .affil { color: var(--muted); margin: 0 0 20px; }
+    .buttons { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+    .buttons a {
+      background: var(--btn); color: #fff; text-decoration: none;
+      padding: 8px 20px; border-radius: 999px; font-size: 0.95rem;
+    }
+    .buttons a:hover { background: #000; }
+    section { padding: 28px 0; }
+    h2 { font-family: 'Castoro', serif; font-weight: 400; font-size: 1.8rem; text-align: center; margin: 0 0 16px; }
+    p { margin: 0 0 12px; }
+    .video {
+      position: relative; padding-top: 56.25%; background: var(--soft);
+      border-radius: 10px; overflow: hidden; border: 1px solid var(--line);
+    }
+    .video iframe, .video video { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+    .placeholder {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      color: var(--muted); text-align: center; padding: 16px;
+    }
+    .pipeline { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+    .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }
+    .box {
+      background: var(--soft); border: 1px solid var(--line); border-radius: 8px;
+      padding: 8px 12px; font-size: 0.9rem; text-align: center;
+    }
+    .box.real { background: #fff4e5; border-color: #f0c98a; }
+    .box.est { background: #e8f0fc; border-color: #a9c3ec; }
+    .arrow { color: var(--muted); }
+    .legend { font-size: 0.85rem; color: var(--muted); text-align: center; margin-top: 8px; }
+    ul { padding-left: 20px; margin: 0 0 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+    th, td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: var(--soft); }
+    .table-scroll { overflow-x: auto; }
+    pre {
+      background: #1e1e1e; color: #eee; padding: 14px 16px; border-radius: 8px;
+      overflow-x: auto; font-size: 0.88rem; margin: 0 0 12px;
+    }
+    figure { margin: 0; }
+    figure img { width: 100%; border-radius: 8px; border: 1px solid var(--line); display: block; }
+    figcaption { font-size: 0.85rem; color: var(--muted); text-align: center; margin-top: 6px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 640px) { .grid2 { grid-template-columns: 1fr; } }
+    footer { border-top: 1px solid var(--line); color: var(--muted); font-size: 0.85rem; padding: 24px 0 40px; text-align: center; }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+
+<header class="wrap">
+  <h1>Vision-Guided Pick and Place<br>with a UR3e in MuJoCo</h1>
+  <p class="authors">
+    <span>Tasnim Sarah</span><span>Maryam Qutub</span><span>Princess Kisakye</span><span>Vanessa Kurniawidi</span>
+  </p>
+  <p class="affil">Group 16 · 41014 Sensors and Control · University of Technology Sydney</p>
+  <div class="buttons">
+    <a href="https://github.com/USERNAME/Group16_Sensors_and_Control_AT4">Code</a>
+    <a href="#video">Video</a>
+    <a href="#run">Run it</a>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- VIDEO
+       replace the placeholder div with
+         <iframe src="https://www.youtube.com/embed/vid" allowfullscreen></iframe>
+  -->
+  <section id="video">
+    <div class="video">
+      <div class="placeholder">Demo video goes here</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Overview</h2>
+    <p>
+      A simulated UR3e robot with a wrist-mounted RGB-D camera finds red, yellow and blue cubes on a table,
+      picks each one up and drops it in the bin of the same colour. The red cube moves back and forth, so the
+      robot watches it, learns when it pauses, and grabs it during a pause.
+    </p>
+    <p>
+      The robot never reads the simulator's true state. Joint angles come from <b>noisy encoders</b> passed
+      through a <b>state estimator</b>. Cube positions come only from the <b>camera</b> and a
+      <b>Kalman filter</b>. Ground truth is used only to <b>evaluate</b> the results.
+    </p>
+  </section>
+
+  <section>
+    <h2>System</h2>
+    <div class="pipeline">
+      <div class="row">
+        <div class="box real">Wrist RGB-D camera</div><span class="arrow">→</span>
+        <div class="box est">Colour detection</div><span class="arrow">→</span>
+        <div class="box est">Kalman tracker</div><span class="arrow">→</span>
+        <div class="box est">Pause predictor</div>
+      </div>
+      <div class="row">
+        <div class="box real">Joint encoders + noise</div><span class="arrow">→</span>
+        <div class="box est">State estimator</div><span class="arrow">→</span>
+        <div class="box est">Forward kinematics</div>
+      </div>
+      <div class="row">
+        <span class="arrow">↓</span>
+      </div>
+      <div class="row">
+        <div class="box est">Trajectory planner</div><span class="arrow">→</span>
+        <div class="box est">Jacobian / joint controller</div><span class="arrow">→</span>
+        <div class="box real">UR3e + gripper (MuJoCo)</div>
+      </div>
+      <p class="legend">Orange = the real (simulated) world · Blue = what the robot computes from its sensors</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Keeping ground truth out of the controller</h2>
+    <ul>
+      <li><b>Arm state:</b> the tool pose, Jacobian and camera pose are computed from the <i>estimated</i> joint angles, on a separate copy of the model.</li>
+      <li><b>Cube positions:</b> taken only from the camera (RGB-D detection, then the Kalman filter).</li>
+      <li><b>Grasp detection:</b> from the finger position sensors (a finger blocked short of its target means the cube is held), not from simulator contacts.</li>
+      <li><b>Gravity compensation:</b> computed from the robot model at the estimated state.</li>
+      <li><b>Evaluation:</b> the true cube and bin positions are read only in code marked <code>EVALUATION ONLY</code> to report whether each placement succeeded.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Results</h2>
+    <div class="table-scroll">
+      <table>
+        <tr><th>Test</th><th>Attempts</th><th>Successful</th><th>Success rate</th></tr>
+        <tr><td>Static cubes</td><td>–</td><td>–</td><td>–</td></tr>
+        <tr><td>Moving red cube</td><td>–</td><td>–</td><td>–</td></tr>
+        <tr><td>Higher encoder noise</td><td>–</td><td>–</td><td>–</td></tr>
+      </table>
+    </div>
+    <!-- Put images in docs/static/ and uncomment:
+    <div class="grid2" style="margin-top:16px">
+      <figure><img src="static/scene.png" alt="Scene"><figcaption>The scene: table, cubes and bins</figcaption></figure>
+      <figure><img src="static/tracking.png" alt="Tracking"><figcaption>Kalman-tracked vs true cube position</figcaption></figure>
+    </div>
+    -->
+  </section>
+
+  <section id="run">
+    <h2>Run it</h2>
+    <p>Python 3.12. From a fresh environment:</p>
+<pre>git clone https://github.com/USERNAME/Group16_Sensors_and_Control_AT4.git
+cd Group16_Sensors_and_Control_AT4
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python pick_place_estimated.py r b y</pre>
+    <p><code>r b y</code> is the pick order. Full instructions are in the repository README.</p>
+  </section>
+
+</main>
+
+<footer class="wrap">
+  UR3e model adapted from SouthColumn76/universal_robots_ur3e (BSD-3-Clause). Simulation: MuJoCo.<br>
+  Page layout inspired by the Nerfies project page.
+</footer>
+
+</body>
+</html>
