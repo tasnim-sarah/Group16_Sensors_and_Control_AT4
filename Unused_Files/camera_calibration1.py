@@ -7,8 +7,8 @@ import cv2
 import mujoco
 import mujoco.viewer
 import numpy as np
-import cameramodulekal_1
-from cameramodulekal_1 import CameraSensor, add_wrist_camera, aim_camera_once
+import Sensors_Control_Mech_Systems.Group16_Sensors_and_Control_AT4.universal_robots_ur3e.cameramodulekal_1 as cameramodulekal_1
+from Sensors_Control_Mech_Systems.Group16_Sensors_and_Control_AT4.universal_robots_ur3e.cameramodulekal_1 import CameraSensor, add_wrist_camera, aim_camera_once
 
 
 print("Camera module loaded from:", cameramodulekal_1.__file__)
