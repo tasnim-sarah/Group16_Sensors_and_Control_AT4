@@ -242,8 +242,7 @@ class PausePredictor:
 COLOURS = {
     'r': dict(name='red', cube='red_cube', bin='red_bin', drop='red_bin_drop'),
     'b': dict(name='blue', cube='blue_cube', bin='blue_bin', drop='blue_bin_drop'),
-    'y': dict(name='yellow', cube='yellow_cube', bin='yellow_bin',
-              drop='yellow_bin_drop'),
+    'y': dict(name='yellow', cube='yellow_cube', bin='yellow_bin', drop='yellow_bin_drop'),
 }
 
 # ---- Moving red cube settings ------------------------------------------
