@@ -7,7 +7,7 @@ import cv2
 import mujoco
 import mujoco.viewer
 import numpy as np
-from wrist_vision import CameraSensor, aim_camera_once, COLOUR_RANGES
+from Sensors_Control_Mech_Systems.Group16_Sensors_and_Control_AT4.universal_robots_ur3e.wrist_vision import CameraSensor, aim_camera_once, COLOUR_RANGES
 
 # Scene names. If your XML uses different names, change them here.
 COLOURS = {

@@ -8,7 +8,7 @@ import cv2
 import mujoco
 import mujoco.viewer
 import numpy as np
-from camera_module import CameraSensor, aim_camera_once
+from Sensors_Control_Mech_Systems.Group16_Sensors_and_Control_AT4.Unused_Files.camera_module import CameraSensor, aim_camera_once
 import platform
 
 IS_MAC = platform.system() == "Darwin"

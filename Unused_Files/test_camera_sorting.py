@@ -3,8 +3,11 @@ from pathlib import Path
 import numpy as np
 import cv2
 import mujoco
+#import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from camera_module import CameraSensor, add_wrist_camera, aim_camera_once
+from Sensors_Control_Mech_Systems.Group16_Sensors_and_Control_AT4.universal_robots_ur3e.camera_module import CameraSensor, add_wrist_camera, aim_camera_once
 
 HERE = Path(__file__).resolve().parent
 spec = mujoco.MjSpec.from_file(str(HERE / "universal_robots_ur3e" / "pick_scene.xml"))
@@ -55,6 +58,8 @@ try:
     axes[1].axis("off")
     fig.colorbar(im, ax=axes[1], label="metres")
     plt.tight_layout()
-    plt.show()
+    #plt.show()
+    plt.savefig("camera_sorting_result.png", dpi=150, bbox_inches="tight")
+    print("Saved camera_sorting_result.png")
 finally:
     renderer.close()
