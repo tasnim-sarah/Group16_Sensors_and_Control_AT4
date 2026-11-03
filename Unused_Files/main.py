@@ -8,6 +8,9 @@ import mujoco
 import mujoco.viewer
 import numpy as np
 
+import matplotlib.pyplot as plt
+from Sensors_Control_Mech_Systems.Group16_Sensors_and_Control_AT4.universal_robots_ur3e.camera_module import CameraSensor, add_wrist_camera, aim_camera_once
+
 
 spec = mujoco.MjSpec.from_file(str(Path(__file__).parent   / "universal_robots_ur3e" / "pick_scene.xml"))
  
@@ -24,41 +27,8 @@ wrist.add_geom(name="camera_shell", type=mujoco.mjtGeom.mjGEOM_BOX,
 wrist_cam = wrist.add_camera(name="wrist_cam", pos=[0.0325, 0.095, 0.05], fovy=51.28)
 wrist_cam.alt.type = mujoco.mjtOrientation.mjORIENTATION_XYAXES
 wrist_cam.alt.xyaxes = [1, 0, 0, 0, 0, 1]  
-
-# gripper
-gripper = wrist.add_body(name="gripper_base", pos=[0, 0.09215, 0])
-gripper.alt.type = mujoco.mjtOrientation.mjORIENTATION_XYAXES
-gripper.alt.xyaxes = [0, 0, 1, 1, 0, 0] 
-
-gripper.add_geom(name="palm", type=mujoco.mjtGeom.mjGEOM_BOX, size=[0.02, 0.045, 0.01],
-                 pos=[0, 0, 0.01], mass=0.25, rgba=[0.2, 0.2, 0.2, 1],
-                 contype=1, conaffinity=1, group=0)
-
-FINGER_TRAVEL = 0.022 
-for side, sign in [("left", 1), ("right", -1)]:
-    finger = gripper.add_body(name=f"finger_{side}", pos=[0, sign * 0.032, 0.04])
-    finger.add_joint(name=f"finger_{side}", type=mujoco.mjtJoint.mjJNT_SLIDE,
-                     axis=[0, -sign, 0], range=[0, FINGER_TRAVEL],
-                     damping=5, armature=0.001)
-    finger.add_geom(name=f"finger_{side}_pad", type=mujoco.mjtGeom.mjGEOM_BOX,
-                    size=[0.008, 0.005, 0.02], mass=0.05, rgba=[0.3, 0.3, 0.3, 1],
-                    friction=[1.5, 0.01, 0.001], condim=4,
-                    contype=1, conaffinity=1, group=0)
-
-# Tool centre point
-gripper.add_site(name="tcp", pos=[0, 0, 0.045],size=[0.006, 0, 0], rgba=[1, 0, 1, 1])
-
-# make sure both fingers move together
-spec.add_equality(type=mujoco.mjtEq.mjEQ_JOINT, objtype=mujoco.mjtObj.mjOBJ_JOINT,
-                  name1="finger_right", name2="finger_left")
-
-# Gripper actuator
-grip = spec.add_actuator(name="gripper", target="finger_left", trntype=mujoco.mjtTrn.mjTRN_JOINT)
-grip.set_to_position(kp=400)
-grip.ctrlrange = [0, FINGER_TRAVEL]
-grip.forcerange = [-20, 20]
-
-model = spec.compile() 
+ 
+model = spec.compile()
 data = mujoco.MjData(model)
 
 
@@ -85,13 +55,16 @@ print("Tip: Rendering -> Camera -> wrist_cam shows what the robot sees.")
 for n in ["red_bin", "yellow_bin", "blue_bin"]:
     print(n, model.body(n).pos)
  
-# Run
+# Run (Need to edit to include the camera and the robot's movement to pick up the cubes)
 with mujoco.viewer.launch_passive(model, data) as viewer:
     while viewer.is_running():
         t0 = time.time()
+
         data.ctrl[:6] = HOME
         mujoco.mj_step(model, data)
+        
         viewer.sync()
+        
         sleep = model.opt.timestep - (time.time() - t0)
         if sleep > 0:
             time.sleep(sleep)

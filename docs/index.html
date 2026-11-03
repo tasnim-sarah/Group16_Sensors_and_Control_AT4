@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vision-Guided Pick and Place – Group 16</title>
+  <meta name="description" content="UR3e vision-guided pick & place in MuJoCo. 41014 Sensors and Control, Group 16.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;600;700&family=Castoro&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --text: #222;
+      --muted: #555;
+      --bg: #d1ceec;
+      --card: #ffffff;
+      --soft: #f5f6f8;
+      --line: #e3e5e8;
+      --accent: #1f5fbf;
+      --btn: #363636;
+      --todo-bg: #fff8e1;
+      --todo-line: #e0b84c;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: 'Noto Sans', system-ui, sans-serif; line-height: 1.6;
+    }
+    .wrap { max-width: 900px; margin: 0 auto; padding: 0 16px; }
+    header { text-align: center; padding: 56px 0 24px; }
+    h1 { font-family: 'Castoro', serif; font-weight: 400; font-size: clamp(1.9rem, 5vw, 2.8rem); line-height: 1.2; margin: 0 0 16px; }
+    .authors { font-size: 1.1rem; margin: 0 0 4px; }
+    .authors span { display: inline-block; margin: 0 10px; color: var(--accent); }
+    .affil { color: var(--muted); margin: 0 0 20px; }
+    .buttons { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+    .buttons a {
+      background: var(--btn); color: #fff; text-decoration: none;
+      padding: 8px 20px; border-radius: 999px; font-size: 0.95rem;
+    }
+    .buttons a:hover { background: #000; }
+
+    section {
+      background: var(--card); border-radius: 12px; padding: 28px 28px 20px;
+      margin: 20px 0; 
+    }
+    @media (max-width: 640px) { section { padding: 20px 16px 12px; } }
+    h2 { font-family: 'Castoro', serif; font-weight: 400; font-size: 1.8rem; text-align: center; margin: 0 0 4px; }
+    .criterion { text-align: center; color: var(--muted); font-size: 0.85rem; margin: 0 0 18px; }
+    h3 { font-size: 1.05rem; margin: 20px 0 8px; }
+    p { margin: 0 0 12px; }
+    .video {
+      position: relative; padding-top: 56.25%; background: var(--soft);
+      border-radius: 10px; overflow: hidden; border: 1px solid var(--line);
+    }
+    .video iframe, .video video { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+    .placeholder {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      color: var(--muted); text-align: center; padding: 16px;
+    }
+    .pipeline { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+    .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }
+    .box {
+      background: var(--soft); border: 1px solid var(--line); border-radius: 8px;
+      padding: 8px 12px; font-size: 0.9rem; text-align: center;
+    }
+    .box.real { background: #fff4e5; border-color: #f0c98a; }
+    .box.est { background: #e8f0fc; border-color: #a9c3ec; }
+    .box.eval { background: #eeeeee; border-color: #c8c8c8; }
+    .arrow { color: var(--muted); }
+    .legend { font-size: 0.85rem; color: var(--muted); text-align: center; margin-top: 8px; }
+    ul { padding-left: 20px; margin: 0 0 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+    th, td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: var(--soft); }
+    .table-scroll { overflow-x: auto; margin-bottom: 12px; }
+    pre {
+      background: #1e1e1e; color: #eee; padding: 14px 16px; border-radius: 8px;
+      overflow-x: auto; font-size: 0.88rem; margin: 0 0 12px;
+    }
+    .eq {
+      background: var(--soft); border-radius: 8px; padding: 10px 14px; margin: 0 0 12px;
+      font-family: 'Cambria Math', 'Times New Roman', serif; font-size: 1.02rem; overflow-x: auto;
+    }
+    figure { margin: 0 0 12px; }
+    figure img { width: 100%; border-radius: 8px; border: 1px solid var(--line); display: block; }
+    figcaption { font-size: 0.85rem; color: var(--muted); text-align: center; margin-top: 6px; }
+    .fig-ph {
+      border: 2px dashed var(--todo-line); background: var(--todo-bg); border-radius: 8px;
+      min-height: 160px; display: flex; align-items: center; justify-content: center;
+      color: #7a5d00; font-size: 0.9rem; text-align: center; padding: 16px;
+    }
+    .todo {
+      border-left: 4px solid var(--todo-line); background: var(--todo-bg);
+      padding: 8px 12px; border-radius: 0 6px 6px 0; margin: 0 0 12px; font-size: 0.92rem;
+    }
+    .todo b { color: #7a5d00; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 640px) { .grid2 { grid-template-columns: 1fr; } }
+    footer { color: var(--muted); font-size: 0.85rem; padding: 24px 0 40px; text-align: center; }
+    a { color: var(--accent); }
+    code { background: var(--soft); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+  </style>
+</head>
+<body>
+
+<!--
+  HOW TO USE THIS OUTLINE
+  - Yellow "TODO" boxes say what goes in each spot and who writes it. Delete each box once it's filled in.
+  - Dashed yellow boxes are figure placeholders. Put images in docs/static/ and replace each box with:
+        <figure><img src="static/FILE.png" alt="..."><figcaption>...</figcaption></figure>
+  - Section letters A–E match the marking criteria.
+-->
+
+<header class="wrap">
+  <h1>Vision-Guided Pick and Place<br>with a UR3e in MuJoCo</h1>
+  <p class="authors">
+    <span>Tasnim Sarah</span><span>Maryam Qutub</span><span>Princess Kisakye</span><span>Vanessa Kurniawidi</span>
+  </p>
+  <p class="affil">Group 16:  41014 Sensors and Control UTS - Track B</p>
+  <div class="buttons">
+    <a href="https://github.com/tasnim-sarah/Group16_Sensors_and_Control_AT4">Code on GitHub</a>
+  </div>
+</header>
+
+
+<main class="wrap">
+
+  <!-- VIDEO
+       replace with link t vid
+         <iframe src="https://www.youtube.com/embed/simRunning" allowfullscreen></iframe>
+  -->
+  <section id="video">
+    <h2>Demo video</h2>
+    <p class="criterion"> UR3E performing tasks with disturbed trial </p>
+    <div class="video">
+      <div class="placeholder">Demo video goes here</div>
+    </div>
+  </section>
+
+  <!-- OVERVIEW -->
+  <section id="overview">
+    <h2>Overview</h2>
+    <p>
+      A simulated UR3e robot with a wrist-mounted RGB-D camera finds red, yellow and blue cubes on a table,
+      picks each one up and drops it in the bin of the same colour. Cube positions are <b>randomised every
+      trial</b>. The red cube moves back and forth, so the robot watches it, learns when it pauses, and
+      grabs it during a pause.
+    </p>
+   
+
+  </section> 
+
+  <!-- SYSTEM -->
+  <section id="system">
+    <h2>System</h2>
+    <div class="pipeline">
+      <div class="row">
+        <div class="box real">Wrist RGB-D camera</div><span class="arrow">→</span>
+        <div class="box est">Colour detection</div><span class="arrow">→</span>
+        <div class="box est">Kalman tracker</div><span class="arrow">→</span>
+        <div class="box est">Pause predictor</div>
+      </div>
+      <div class="row">
+        <div class="box real">Joint encoders + noise</div><span class="arrow">→</span>
+        <div class="box est">State estimator</div><span class="arrow">→</span>
+        <div class="box est">Forward kinematics</div>
+      </div>
+      <div class="row">
+        <span class="arrow">↓</span>
+      </div>
+      <div class="row">
+        <div class="box est">Trajectory planner</div><span class="arrow">→</span>
+        <div class="box est">Jacobian / joint controller</div><span class="arrow">→</span>
+        <div class="box real">UR3e + gripper (MuJoCo)</div>
+      </div>
+      <div class="row">
+        <span class="arrow">↓</span>
+      </div>
+      <div class="row">
+        <div class="box eval">Evaluation only: true cube and bin positions → success / error metrics</div>
+      </div>
+      <p class="legend">Orange = the real (simulated) world · Blue = what the robot computes from its sensors · Grey = evaluation, never fed back to the robot</p>
+    </div>
+
+    <h3>Scene</h3>
+    <p>
+      The UR3e (adapted from SouthColumn76/universal_robots_ur3e) is mounted at the edge of a table whose top is at
+      z = 0. Three 40 mm cubes with free joints are placed at random positions in separate strips, and three
+      open bins sit beside the robot. A two-finger gripper and the RGB-D camera are added to
+      <code>wrist_3_link</code> in Python, so the robot model file is not edited.
+    </p>
+    <div class="fig-ph">image of screenshot of the scene (robot, table, cubes, bins)</div>
+
+    <h3>Keeping ground truth out of the controller</h3>
+    <ul>
+      <li><b>Arm state:</b> the tool pose, Jacobian and camera pose are computed from the <i>estimated</i> joint angles, on a separate copy of the model.</li>
+      <li><b>Cube positions:</b> taken only from the camera (RGB-D detection, then the Kalman filter).</li>
+      <li><b>Grasp detection:</b> from the finger position sensors (a finger blocked short of its target means the cube is held), not from simulator contacts.</li>
+      <li><b>Gravity compensation:</b> computed from the robot model at the estimated state.</li>
+      <li><b>Evaluation:</b> the true cube and bin positions are read only in code marked <code>EVALUATION ONLY</code> to report whether each placement succeeded.</li>
+    </ul>
+  </section>
+
+  <!-- MODELLING -->
+  <section id="modelling">
+    <h2>Modelling</h2>
+    <p class="criterion">State-space model, controllability and observability</p>
+
+    <h3>State-space model</h3>
+    <p>State, input and output:</p>
+    <div class="eq">x = [q₁ … q₆, q̇₁ … q̇₆]ᵀ &nbsp;(12 states) &nbsp;&nbsp;·&nbsp;&nbsp; u = joint torque / command &nbsp;&nbsp;·&nbsp;&nbsp; y = [q₁ … q₆]ᵀ (encoders)</div>
+    <div class="eq">ẋ = A x + B u, &nbsp;&nbsp; y = C x</div>
+    <div class="todo">write out A, B, C for the UR3e, e.g. a double integrator per joint, or a model linearised about the home pose from the MuJoCo dynamics. Give the parameter values (masses, inertias, damping, dt = 0.002 s) and how they were obtained.</div>
+
+    <h3>Assumptions</h3>
+    <div class="todo">list the assumptions, e.g. joints decoupled, gravity compensated by a feed-forward term, linearised about the home pose, discretised at the simulation timestep. Say where each one breaks down.</div>
+
+    <h3>Controllability and observability</h3>
+    <div class="eq">rank [B, AB, …, Aⁿ⁻¹B] = ? &nbsp;&nbsp;&nbsp; rank [C; CA; …; CAⁿ⁻¹] = ?</div>
+    <div class="todo"><b>give both ranks (12 = full) and explain in words: encoders measure only angles, but the velocities are observable from how the angles change, so an observer can recover them.</div>
+  </section>
+
+  <!-- SENSING -->
+  <section id="sensing">
+    <h2>Sensing</h2>
+    <p class="criterion">Calibration, noise handling and frame management</p>
+
+    <h3>Camera calibration</h3>
+    <p>
+      The wrist camera renders 640 × 480 RGB and depth images with a vertical field of view of 51.28°.
+      Its pinhole intrinsics are:
+    </p>
+    <div class="eq">f = (H/2) / tan(fovy/2) = 500 px &nbsp;&nbsp;&nbsp; K = [[500, 0, 319.5], [0, 500, 239.5], [0, 0, 1]]</div>
+    <div class="todo">give the camera-to-wrist transform (position [0.0325, 0.095, 0.05] m on wrist_3_link plus its rotation) and describe how calibration was validated, e.g. localising cubes at known positions and reporting the error.</div>
+
+    <h3>Frame diagram</h3>
+    <div class="fig-ph">image of frame diagram, world → base → wrist_3 → camera → cube, with labelled axes and the transform between each pair</div>
+    <p>A detected point is moved through these frames before the controller uses it:</p>
+    <div class="eq">p<sub>world</sub> = T<sub>world←base</sub> · T<sub>base←wrist</sub>(q̂) · T<sub>wrist←cam</sub> · p<sub>cam</sub></div>
+    <p>T<sub>base←wrist</sub> comes from forward kinematics of the <i>estimated</i> joint angles q̂.</p>
+
+    <h3>Depth-based localisation</h3>
+    <ul>
+      <li>Convert RGB to HSV and threshold each colour (red uses two hue ranges because hue wraps around).</li>
+      <li>Clean the mask (open, close), keep the largest blob, and take its centroid (u, v).</li>
+      <li>Depth d = median of the depth pixels inside the eroded blob, which rejects edge outliers.</li>
+      <li>Back-project to the camera frame and transform to the world frame:</li>
+    </ul>
+    <div class="eq">p<sub>cam</sub> = [(u − c<sub>x</sub>)·d/f, &nbsp;−(v − c<sub>y</sub>)·d/f, &nbsp;−d]</div>
+    <ul>
+      <li>Move the point half a cube (20 mm) along the viewing ray, because the camera sees the near face and the gripper needs the centre.</li>
+    </ul>
+
+    <h3>Noise handling</h3>
+    <div class="todo">say what noise is added (depth noise σ, pixel noise, encoder noise σ = 0.0005 rad) and how it is handled (median depth, Kalman filter). Justify each σ, e.g. from a real RealSense datasheet.</div>
+
+    <h3>Results</h3>
+    <div class="table-scroll">
+      <table>
+        <tr><th>Condition</th><th>Trials</th><th>Mean localisation error (mm)</th><th>Std (mm)</th></tr>
+        <tr><td>No added noise</td><td>–</td><td>–</td><td>–</td></tr>
+        <tr><td>Depth noise σ = ?</td><td>–</td><td>–</td><td>–</td></tr>
+      </table>
+    </div>
+    <div class="fig-ph">image oflocalisation error vs distance or vs noise level</div>
+  </section>
+
+  <!-- ESTIMATION -->
+  <section id="estimation">
+    <h2>Estimation</h2>
+    <p class="criterion">Observer / Kalman filter design, tuning and reported performance</p>
+
+    <h3>Joint state observer</h3>
+    <p>Estimates all 12 joint states from the 6 noisy encoder readings. Each step:</p>
+    <div class="eq">Predict: &nbsp; x̂⁻ = A<sub>d</sub> x̂ + B<sub>d</sub> u, &nbsp;&nbsp; P⁻ = A<sub>d</sub> P A<sub>d</sub>ᵀ + Q</div>
+    <div class="eq">Correct: &nbsp; K = P⁻Cᵀ(C P⁻ Cᵀ + R)⁻¹, &nbsp;&nbsp; x̂ = x̂⁻ + K(y − C x̂⁻), &nbsp;&nbsp; P = (I − KC)P⁻</div>
+    <div class="todo"> give Q and R values and justify them (R from the encoder noise σ², Q from model mismatch). Describe initialisation.</div>
+
+    <h3>Cube Kalman filter</h3>
+    <p>
+      One filter per object, with state [x, y, z, v<sub>x</sub>, v<sub>y</sub>, v<sub>z</sub>], a constant-velocity
+      model at 30 Hz, and a measurement of position only (the camera cannot measure velocity directly).
+    </p>
+    <div class="table-scroll">
+      <table>
+        <tr><th>Parameter</th><th>Value</th><th>Reason</th></tr>
+        <tr><td>Measurement noise R</td><td>0.000025 · I₃ (σ ≈ 5 mm)</td><td>TODO: link to measured localisation noise</td></tr>
+        <tr><td>Process noise Q</td><td>0.001 · I₆</td><td>TODO: allows the moving cube to change speed</td></tr>
+        <tr><td>Initial covariance P₀</td><td>I₆</td><td>Position unknown before the first detection</td></tr>
+      </table>
+    </div>
+    <p>If the cube leaves the view, the filter keeps predicting without corrections and its uncertainty grows. Filters are reset when tracking restarts.</p>
+
+    <h3>Results</h3>
+    <div class="grid2">
+      <div class="fig-ph">image of estimated vs true joint angle and velocity, with ±2σ band</div>
+      <div class="fig-ph">image ofraw camera vs Kalman vs true cube position (moving red cube), with ±2σ band</div>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <tr><th>Estimator</th><th>RMS position error</th><th>RMS velocity error</th><th>% of time inside ±2σ</th></tr>
+        <tr><td>Joint observer</td><td>–</td><td>–</td><td>–</td></tr>
+        <tr><td>Cube Kalman filter</td><td>–</td><td>–</td><td>–</td></tr>
+      </table>
+    </div>
+    <div class="todo">explain and show a tuning trade-off, e.g. R, 10R and R/10, and how smoothness and lag change.</div>
+  </section>
+
+  <!-- ===================================================== D CONTROL -->
+  <section id="control">
+    <h2>Control</h2>
+    <p class="criterion">Controller design, tuning and tracking results</p>
+
+    <h3>Visual servoing (PBVS)</h3>
+    <p>
+      The camera's estimated 3D cube position is the target. The approach is: hover above the cube,
+      descend, close, lift, rotate to the bin, release, return home.
+    </p>
+
+    <h3>Task-space loop</h3>
+    <p>Each step, the gripper-tip error is turned into joint motion with a damped Jacobian inverse:</p>
+    <div class="eq">v = k<sub>p</sub>(p<sub>target</sub> − p̂<sub>tcp</sub>), &nbsp;|v| ≤ 0.25 m/s &nbsp;&nbsp;&nbsp; q̇ = Jᵀ(JJᵀ + λ²I)⁻¹[v; k<sub>r</sub>e<sub>rot</sub>] + (I − J⁺J)q̇<sub>posture</sub></div>
+    <p>p̂<sub>tcp</sub> and J come from the estimated joint angles.</p>
+
+    <h3>State-space joint controller</h3>
+    <div class="todo">describe the joint controller (LQR or state feedback).</div>
+
+    <h3>Tuning values</h3>
+    <div class="table-scroll">
+      <table>
+        <tr><th>Parameter</th><th>Value</th><th>Reason</th></tr>
+        <tr><td>Position gain k<sub>p</sub></td><td>–</td><td>–</td></tr>
+        <tr><td>Rotation gain k<sub>r</sub></td><td>–</td><td>–</td></tr>
+        <tr><td>Damping λ</td><td>–</td><td>Stability near singular poses</td></tr>
+        <tr><td>Max tip speed</td><td>0.25 m/s</td><td>–</td></tr>
+        <tr><td>LQR Q / R or joint gains</td><td>–</td><td>–</td></tr>
+      </table>
+    </div>
+
+    <h3>Results</h3>
+    <div class="grid2">
+      <div class="fig-ph">image of TCP tracking error vs time during a pick</div>
+      <div class="fig-ph">image of control effort (joint torque or command) vs time</div>
+    </div>
+    <div class="todo">explain the settling time, final grasp position error (mm), and a gain trade-off (control effort vs tracking error) </div>
+  </section>
+
+  <!-- ===================================================== E ROBUSTNESS -->
+  <section id="robustness">
+    <h2>Integration and robustness</h2>
+    <p class="criterion">Performance under disturbance and noise</p>
+
+    <h3>Experiment setup</h3>
+    <div class="todo">explain the number of trials per condition, how cube positions are randomised (x range, y strips, shuffled colours), and how success is measured (cube inside the matching bin, checked with ground truth in evaluation only).</div>
+
+    <h3>Results</h3>
+    <div class="table-scroll">
+      <table>
+        <tr><th>Condition</th><th>Trials</th><th>Pick success</th><th>Placement success</th><th>Mean grasp error (mm)</th></tr>
+        <tr><td>Nominal (random positions)</td><td>–</td><td>–</td><td>–</td><td>–</td></tr>
+        <tr><td>Encoder noise ×2</td><td>–</td><td>–</td><td>–</td><td>–</td></tr>
+        <tr><td>Encoder noise ×5</td><td>–</td><td>–</td><td>–</td><td>–</td></tr>
+        <tr><td>Camera depth noise</td><td>–</td><td>–</td><td>–</td><td>–</td></tr>
+        <tr><td>Push disturbance during move</td><td>–</td><td>–</td><td>–</td><td>–</td></tr>
+        <tr><td>Moving red cube</td><td>–</td><td>–</td><td>–</td><td>–</td></tr>
+      </table>
+    </div>
+    <div class="fig-ph">image of success rate vs noise level</div>
+
+    <h3>Failure analysis</h3>
+    <div class="todo">for each failure type, trace it to the stage that caused it (model, sensing, estimator or controller).</div>
+  </section>
+
+  <!-- EXTENSION (possible HD????)-->
+  <section id="extension">
+    <h2>Future hardware implementation and limitations</h2>
+    <p class="criterion">topic of discussion</p>
+
+    <h3>Intercepting a moving cube</h3>
+    <p>
+      Beyond the brief, the red cube slides back and forth with pauses. A pause predictor uses only the
+      Kalman-filtered camera speed to detect pauses, learns their length and the cycle time, and predicts
+      when and where the next pause will happen. The robot moves into position early, confirms with the camera
+      that the cube has stopped, and grasps it before it moves again.
+    </p>
+    <div class="todo"><b>add results (success rate over numbered trials, timing margin) and a figure of predicted vs actual pause times.</div>
+
+    <h3>Limitations</h3>
+    <p>
+      talk abt limitations of the project 
+  </section>
+
+  <!-- ===================================================== RUN -->
+  <section id="run">
+    <h2>Run it</h2>
+    <p>Python 3.12. From a fresh environment:</p>
+<pre>git clone https://github.com/USERNAME/Group16_Sensors_and_Control_AT4.git
+cd Group16_Sensors_and_Control_AT4
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python pick_place_estimated.py r b y</pre>
+    <p><code>r b y</code> is the pick order. A camera-detection window appears first (press any key), then the MuJoCo viewer and a live wrist-camera window. Each cube is placed in its bin and a summary is printed. Full instructions are in the repository README.</p>
+  </section>
+
+  <!-- CONTRIBUTIONS -->
+  <section id="contributions">
+    <h2>Contributions</h2>
+    <div class="table-scroll">
+      <table>
+        <tr><th>Member</th><th>Contribution</th></tr>
+        <tr><td>Tasnim Sarah</td><td>blah</td></tr>
+        <tr><td>Maryam Qutub</td><td>blah</td></tr>
+        <tr><td>Princess Kisakye</td><td>blah</td></tr>
+        <tr><td>Vanessa Kurniawidi</td><td>blah</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- GENAI -->
+  <section id="genai">
+    <h2>Generative AI declaration</h2>
+    <div class="table-scroll">
+      <table>
+        <tr><th>Tool</th><th>Used for</th><th>How output was checked</th></tr>
+        <tr><td>Claude</td><td>troubleshooting</td><td>double checked with team members to verify</td></tr>
+      </table>
+    </div>
+  </section>
+
+</main>
+
+<footer class="wrap">
+  UR3e model adapted from SouthColumn76/universal_robots_ur3e (BSD-3-Clause). Simulation: MuJoCo (Google DeepMind). Vision: OpenCV.<br>
+  Code adapted from the 41014 weekly tutorials where noted in the source. Page layout inspired by the Nerfies project page.
+</footer>
+
+</body>
+</html>

@@ -4,7 +4,7 @@ import numpy as np
 import cv2
 import mujoco
 import matplotlib.pyplot as plt
-from camera_module import CameraSensor, add_wrist_camera, aim_camera_once
+from Sensors_Control_Mech_Systems.Group16_Sensors_and_Control_AT4.universal_robots_ur3e.camera_module import CameraSensor, add_wrist_camera, aim_camera_once
 
 HERE = Path(__file__).resolve().parent
 spec = mujoco.MjSpec.from_file(str(HERE / "universal_robots_ur3e" / "pick_scene.xml"))
