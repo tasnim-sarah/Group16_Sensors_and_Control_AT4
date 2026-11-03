@@ -146,11 +146,7 @@
       trial</b>. The red cube moves back and forth, so the robot watches it, learns when it pauses, and
       grabs it during a pause.
     </p>
-    <p>
-      The robot never reads the simulator's true state. Joint angles come from <b>noisy encoders</b> passed
-      through a <b>state estimator</b>. Cube positions come only from the <b>camera</b> and a
-      <b>Kalman filter</b>. Ground truth is used only to <b>evaluate</b> the results.
-    </p>
+   
 
   </section> 
 
@@ -193,7 +189,7 @@
       open bins sit beside the robot. A two-finger gripper and the RGB-D camera are added to
       <code>wrist_3_link</code> in Python, so the robot model file is not edited.
     </p>
-    <div class="fig-ph">Figure: screenshot of the scene (robot, table, cubes, bins)</div>
+    <div class="fig-ph">image of screenshot of the scene (robot, table, cubes, bins)</div>
 
     <h3>Keeping ground truth out of the controller</h3>
     <ul>
@@ -205,28 +201,28 @@
     </ul>
   </section>
 
-  <!-- ===================================================== A MODELLING -->
+  <!-- MODELLING -->
   <section id="modelling">
-    <h2>A · Modelling</h2>
+    <h2>Modelling</h2>
     <p class="criterion">State-space model, controllability and observability</p>
 
     <h3>State-space model</h3>
     <p>State, input and output:</p>
     <div class="eq">x = [q₁ … q₆, q̇₁ … q̇₆]ᵀ &nbsp;(12 states) &nbsp;&nbsp;·&nbsp;&nbsp; u = joint torque / command &nbsp;&nbsp;·&nbsp;&nbsp; y = [q₁ … q₆]ᵀ (encoders)</div>
     <div class="eq">ẋ = A x + B u, &nbsp;&nbsp; y = C x</div>
-    <div class="todo"><b>TODO (Maryam / Person 2):</b> write out A, B, C for the UR3e, e.g. a double integrator per joint, or a model linearised about the home pose from the MuJoCo dynamics. Give the parameter values (masses, inertias, damping, dt = 0.002 s) and how they were obtained.</div>
+    <div class="todo">write out A, B, C for the UR3e, e.g. a double integrator per joint, or a model linearised about the home pose from the MuJoCo dynamics. Give the parameter values (masses, inertias, damping, dt = 0.002 s) and how they were obtained.</div>
 
     <h3>Assumptions</h3>
-    <div class="todo"><b>TODO (Person 2):</b> list the assumptions, e.g. joints decoupled, gravity compensated by a feed-forward term, linearised about the home pose, discretised at the simulation timestep. Say where each one breaks down.</div>
+    <div class="todo">list the assumptions, e.g. joints decoupled, gravity compensated by a feed-forward term, linearised about the home pose, discretised at the simulation timestep. Say where each one breaks down.</div>
 
     <h3>Controllability and observability</h3>
     <div class="eq">rank [B, AB, …, Aⁿ⁻¹B] = ? &nbsp;&nbsp;&nbsp; rank [C; CA; …; CAⁿ⁻¹] = ?</div>
-    <div class="todo"><b>TODO (Person 2):</b> give both ranks (12 = full) and explain in words: encoders measure only angles, but the velocities are observable from how the angles change, so an observer can recover them.</div>
+    <div class="todo"><b>give both ranks (12 = full) and explain in words: encoders measure only angles, but the velocities are observable from how the angles change, so an observer can recover them.</div>
   </section>
 
-  <!-- ===================================================== B SENSING -->
+  <!-- SENSING -->
   <section id="sensing">
-    <h2>B · Sensing</h2>
+    <h2>Sensing</h2>
     <p class="criterion">Calibration, noise handling and frame management</p>
 
     <h3>Camera calibration</h3>
@@ -235,10 +231,10 @@
       Its pinhole intrinsics are:
     </p>
     <div class="eq">f = (H/2) / tan(fovy/2) = 500 px &nbsp;&nbsp;&nbsp; K = [[500, 0, 319.5], [0, 500, 239.5], [0, 0, 1]]</div>
-    <div class="todo"><b>TODO (Tasnim / Person 1):</b> give the camera-to-wrist transform (position [0.0325, 0.095, 0.05] m on wrist_3_link plus its rotation) and describe how calibration was validated, e.g. localising cubes at known positions and reporting the error.</div>
+    <div class="todo">give the camera-to-wrist transform (position [0.0325, 0.095, 0.05] m on wrist_3_link plus its rotation) and describe how calibration was validated, e.g. localising cubes at known positions and reporting the error.</div>
 
     <h3>Frame diagram</h3>
-    <div class="fig-ph">Figure: frame diagram, world → base → wrist_3 → camera → cube, with labelled axes and the transform between each pair</div>
+    <div class="fig-ph">image of frame diagram, world → base → wrist_3 → camera → cube, with labelled axes and the transform between each pair</div>
     <p>A detected point is moved through these frames before the controller uses it:</p>
     <div class="eq">p<sub>world</sub> = T<sub>world←base</sub> · T<sub>base←wrist</sub>(q̂) · T<sub>wrist←cam</sub> · p<sub>cam</sub></div>
     <p>T<sub>base←wrist</sub> comes from forward kinematics of the <i>estimated</i> joint angles q̂.</p>
@@ -256,7 +252,7 @@
     </ul>
 
     <h3>Noise handling</h3>
-    <div class="todo"><b>TODO (Person 1):</b> say what noise is added (depth noise σ, pixel noise, encoder noise σ = 0.0005 rad) and how it is handled (median depth, Kalman filter). Justify each σ, e.g. from a real RealSense datasheet.</div>
+    <div class="todo">say what noise is added (depth noise σ, pixel noise, encoder noise σ = 0.0005 rad) and how it is handled (median depth, Kalman filter). Justify each σ, e.g. from a real RealSense datasheet.</div>
 
     <h3>Results</h3>
     <div class="table-scroll">
@@ -266,19 +262,19 @@
         <tr><td>Depth noise σ = ?</td><td>–</td><td>–</td><td>–</td></tr>
       </table>
     </div>
-    <div class="fig-ph">Figure: localisation error vs distance or vs noise level</div>
+    <div class="fig-ph">image oflocalisation error vs distance or vs noise level</div>
   </section>
 
-  <!-- ===================================================== C ESTIMATION -->
+  <!-- ESTIMATION -->
   <section id="estimation">
-    <h2>C · Estimation</h2>
+    <h2>Estimation</h2>
     <p class="criterion">Observer / Kalman filter design, tuning and reported performance</p>
 
     <h3>Joint state observer</h3>
     <p>Estimates all 12 joint states from the 6 noisy encoder readings. Each step:</p>
     <div class="eq">Predict: &nbsp; x̂⁻ = A<sub>d</sub> x̂ + B<sub>d</sub> u, &nbsp;&nbsp; P⁻ = A<sub>d</sub> P A<sub>d</sub>ᵀ + Q</div>
     <div class="eq">Correct: &nbsp; K = P⁻Cᵀ(C P⁻ Cᵀ + R)⁻¹, &nbsp;&nbsp; x̂ = x̂⁻ + K(y − C x̂⁻), &nbsp;&nbsp; P = (I − KC)P⁻</div>
-    <div class="todo"><b>TODO (Person 2):</b> give Q and R values and justify them (R from the encoder noise σ², Q from model mismatch). Describe initialisation.</div>
+    <div class="todo"> give Q and R values and justify them (R from the encoder noise σ², Q from model mismatch). Describe initialisation.</div>
 
     <h3>Cube Kalman filter</h3>
     <p>
@@ -297,8 +293,8 @@
 
     <h3>Results</h3>
     <div class="grid2">
-      <div class="fig-ph">Figure: estimated vs true joint angle and velocity, with ±2σ band</div>
-      <div class="fig-ph">Figure: raw camera vs Kalman vs true cube position (moving red cube), with ±2σ band</div>
+      <div class="fig-ph">image of estimated vs true joint angle and velocity, with ±2σ band</div>
+      <div class="fig-ph">image ofraw camera vs Kalman vs true cube position (moving red cube), with ±2σ band</div>
     </div>
     <div class="table-scroll">
       <table>
@@ -307,12 +303,12 @@
         <tr><td>Cube Kalman filter</td><td>–</td><td>–</td><td>–</td></tr>
       </table>
     </div>
-    <div class="todo"><b>TODO (Distinction):</b> show a tuning trade-off, e.g. R, 10R and R/10, and how smoothness and lag change.</div>
+    <div class="todo">explain and show a tuning trade-off, e.g. R, 10R and R/10, and how smoothness and lag change.</div>
   </section>
 
   <!-- ===================================================== D CONTROL -->
   <section id="control">
-    <h2>D · Control</h2>
+    <h2>Control</h2>
     <p class="criterion">Controller design, tuning and tracking results</p>
 
     <h3>Visual servoing (PBVS)</h3>
@@ -327,7 +323,7 @@
     <p>p̂<sub>tcp</sub> and J come from the estimated joint angles.</p>
 
     <h3>State-space joint controller</h3>
-    <div class="todo"><b>TODO (Princess / Person 3):</b> describe the joint controller (e.g. LQR or state feedback u = −K(x̂ − x<sub>ref</sub>)), the Q/R weights or gains, and why they were chosen (bandwidth below the observer's, actuator limits).</div>
+    <div class="todo">describe the joint controller (LQR or state feedback).</div>
 
     <h3>Tuning values</h3>
     <div class="table-scroll">
@@ -343,19 +339,19 @@
 
     <h3>Results</h3>
     <div class="grid2">
-      <div class="fig-ph">Figure: TCP tracking error vs time during a pick</div>
-      <div class="fig-ph">Figure: control effort (joint torque or command) vs time</div>
+      <div class="fig-ph">image of TCP tracking error vs time during a pick</div>
+      <div class="fig-ph">image of control effort (joint torque or command) vs time</div>
     </div>
-    <div class="todo"><b>TODO:</b> report settling time, final grasp position error (mm), and a gain trade-off (control effort vs tracking error) for Distinction.</div>
+    <div class="todo">explain the settling time, final grasp position error (mm), and a gain trade-off (control effort vs tracking error) </div>
   </section>
 
   <!-- ===================================================== E ROBUSTNESS -->
   <section id="robustness">
-    <h2>E · Integration and robustness</h2>
+    <h2>Integration and robustness</h2>
     <p class="criterion">Performance under disturbance and noise</p>
 
     <h3>Experiment setup</h3>
-    <div class="todo"><b>TODO (Vanessa / Person 4):</b> number of trials per condition, how cube positions are randomised (x range, y strips, shuffled colours), and how success is measured (cube inside the matching bin, checked with ground truth in evaluation only).</div>
+    <div class="todo">explain the number of trials per condition, how cube positions are randomised (x range, y strips, shuffled colours), and how success is measured (cube inside the matching bin, checked with ground truth in evaluation only).</div>
 
     <h3>Results</h3>
     <div class="table-scroll">
@@ -369,16 +365,16 @@
         <tr><td>Moving red cube</td><td>–</td><td>–</td><td>–</td><td>–</td></tr>
       </table>
     </div>
-    <div class="fig-ph">Figure: success rate vs noise level</div>
+    <div class="fig-ph">image of success rate vs noise level</div>
 
     <h3>Failure analysis</h3>
-    <div class="todo"><b>TODO:</b> for each failure type, trace it to the stage that caused it (model, sensing, estimator or controller). Example: "At ×5 encoder noise, misses came from the estimated TCP being ~8 mm off, so the fingers closed on the cube's edge."</div>
+    <div class="todo">for each failure type, trace it to the stage that caused it (model, sensing, estimator or controller).</div>
   </section>
 
-  <!-- ===================================================== EXTENSION -->
+  <!-- EXTENSION (possible HD????)-->
   <section id="extension">
-    <h2>Extension and limitations</h2>
-    <p class="criterion">Independent contribution (High Distinction)</p>
+    <h2>Future hardware implementation and limitations</h2>
+    <p class="criterion">topic of discussion</p>
 
     <h3>Intercepting a moving cube</h3>
     <p>
@@ -387,10 +383,11 @@
       when and where the next pause will happen. The robot moves into position early, confirms with the camera
       that the cube has stopped, and grasps it before it moves again.
     </p>
-    <div class="todo"><b>TODO:</b> add results (success rate over N trials, timing margin) and a figure of predicted vs actual pause times.</div>
+    <div class="todo"><b>add results (success rate over numbered trials, timing margin) and a figure of predicted vs actual pause times.</div>
 
     <h3>Limitations</h3>
-    <div class="todo"><b>TODO (all):</b> be honest about what the results do and don't show, e.g. a perfect simulated camera, cubes of known size and colour, idealised friction, no real hardware test.</div>
+    <p>
+      talk abt limitations of the project 
   </section>
 
   <!-- ===================================================== RUN -->
@@ -406,31 +403,29 @@ python pick_place_estimated.py r b y</pre>
     <p><code>r b y</code> is the pick order. A camera-detection window appears first (press any key), then the MuJoCo viewer and a live wrist-camera window. Each cube is placed in its bin and a summary is printed. Full instructions are in the repository README.</p>
   </section>
 
-  <!-- ===================================================== CONTRIBUTIONS -->
+  <!-- CONTRIBUTIONS -->
   <section id="contributions">
     <h2>Contributions</h2>
     <div class="table-scroll">
       <table>
         <tr><th>Member</th><th>Contribution</th></tr>
-        <tr><td>Tasnim Sarah</td><td>TODO</td></tr>
-        <tr><td>Maryam Qutub</td><td>TODO</td></tr>
-        <tr><td>Princess Kisakye</td><td>TODO</td></tr>
-        <tr><td>Vanessa Kurniawidi</td><td>MuJoCo scene (table, randomised cubes, bins, wrist camera, gripper), integration of all modules, removal of ground truth from the control loop, robustness evaluation, GitHub repository and project page</td></tr>
+        <tr><td>Tasnim Sarah</td><td>blah</td></tr>
+        <tr><td>Maryam Qutub</td><td>blah</td></tr>
+        <tr><td>Princess Kisakye</td><td>blah</td></tr>
+        <tr><td>Vanessa Kurniawidi</td><td>blah</td></tr>
       </table>
     </div>
-    <div class="todo"><b>TODO:</b> check which person did which role and correct the rows. Each person should write their own row.</div>
   </section>
 
-  <!-- ===================================================== GENAI -->
+  <!-- GENAI -->
   <section id="genai">
     <h2>Generative AI declaration</h2>
     <div class="table-scroll">
       <table>
         <tr><th>Tool</th><th>Used for</th><th>How output was checked</th></tr>
-        <tr><td>TODO</td><td>TODO</td><td>TODO</td></tr>
+        <tr><td>Claude</td><td>troubleshooting</td><td>double checked with team members to verify</td></tr>
       </table>
     </div>
-    <div class="todo"><b>TODO (all):</b> each member lists the tools they used and what for. Non-declaration is an academic integrity matter.</div>
   </section>
 
 </main>
