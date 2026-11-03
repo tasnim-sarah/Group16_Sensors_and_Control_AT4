@@ -224,43 +224,21 @@
   <section id="sensing">
     <h2>Sensing</h2>
     <p class="criterion">Calibration, noise handling and frame management</p>
-
-    <h3>Camera calibration</h3>
     <p>
-      The wrist camera renders 640 × 480 RGB and depth images with a vertical field of view of 51.28°.
-      Its pinhole intrinsics are:
-    </p>
-    <div class="eq">f = (H/2) / tan(fovy/2) = 500 px &nbsp;&nbsp;&nbsp; K = [[500, 0, 319.5], [0, 500, 239.5], [0, 0, 1]]</div>
-    <div class="todo">give the camera-to-wrist transform (position [0.0325, 0.095, 0.05] m on wrist_3_link plus its rotation) and describe how calibration was validated, e.g. localising cubes at known positions and reporting the error.</div>
+      For this project we used a RGB depth camera to detect both the coloured cubes and their respective bins. The camera acts as passive exteroceptive sensors, which takes in the colour information of the environment- the camera “looks” for an object that contains the most amount of pixels containing the colour it is looking for. Based on the shape of the object the camera sees, it estimates the location of the object’s centroid, and communicates to the UR3e to move towards that point.
+MuJoCo renders 640 x 480 RGB and depth images with a vertical field view of __, to work out a focal length of 500 px and image centre to ______. These then form the camera matrix K, which converts a pixel and its depth back into a 3D point. The camera's position on the arm is also fixed on the wrist so the camera moves with the gripper.
+The simulated lens has no distortion, so that part of a real calibration isn’t needed, though on hardware you’d measure it with a checkerboard.  (can mention in hardware implementation Based on the intrinsic camera information, such as the focal length, pixel size and the image centre, the system uses that information to determine extrinsic information, such as the depth to hover above the cube, where the surface of the cube is and where to then pick up and drop off the cube. 
+Before picking up a cube, the wrist camera will scan the arco markers to calibrate and get an understanding of the pose of the camera and how specific joint angles relate to the global reference frame, the camera will then look around for any cubes. After every instance of the UR3e picking up a cube and placing it into a bin, the UR3e will return to a specific location and repeat the initial process. 
+
+    </p> The camera is fixed to <code>wrist_3_link</code> at [0.0325, 0.095, 0.05] m, initially oriented with <code>xyaxes = [1, 0, 0, 0, 0, 1]</code> so it looks along the tool axis (+y of the wrist) and then tilted once at start-up to face the workspace, and the calibration was validated by localising cubes at [N] known positions and comparing them with their true positions, giving a mean error of [ ] mm </p>
+    <div class="todo">.</div>
 
     <h3>Frame diagram</h3>
     <div class="fig-ph">image of frame diagram, world → base → wrist_3 → camera → cube, with labelled axes and the transform between each pair</div>
-    <p>A detected point is moved through these frames before the controller uses it:</p>
-    <div class="eq">p<sub>world</sub> = T<sub>world←base</sub> · T<sub>base←wrist</sub>(q̂) · T<sub>wrist←cam</sub> · p<sub>cam</sub></div>
-    <p>T<sub>base←wrist</sub> comes from forward kinematics of the <i>estimated</i> joint angles q̂.</p>
-
-    <h3>Depth-based localisation</h3>
-    <ul>
-      <li>Convert RGB to HSV and threshold each colour (red uses two hue ranges because hue wraps around).</li>
-      <li>Clean the mask (open, close), keep the largest blob, and take its centroid (u, v).</li>
-      <li>Depth d = median of the depth pixels inside the eroded blob, which rejects edge outliers.</li>
-      <li>Back-project to the camera frame and transform to the world frame:</li>
-    </ul>
-    <div class="eq">p<sub>cam</sub> = [(u − c<sub>x</sub>)·d/f, &nbsp;−(v − c<sub>y</sub>)·d/f, &nbsp;−d]</div>
-    <ul>
-      <li>Move the point half a cube (20 mm) along the viewing ray, because the camera sees the near face and the gripper needs the centre.</li>
-    </ul>
 
     <h3>Noise handling</h3>
     <div class="todo">say what noise is added (depth noise σ, pixel noise, encoder noise σ = 0.0005 rad) and how it is handled (median depth, Kalman filter). Justify each σ, e.g. from a real RealSense datasheet.</div>
 
-    <h3>Results</h3>
-    <div class="table-scroll">
-      <table>
-        <tr><th>Condition</th><th>Trials</th><th>Mean localisation error (mm)</th><th>Std (mm)</th></tr>
-        <tr><td>No added noise</td><td>–</td><td>–</td><td>–</td></tr>
-        <tr><td>Depth noise σ = ?</td><td>–</td><td>–</td><td>–</td></tr>
-      </table>
     </div>
     <div class="fig-ph">image oflocalisation error vs distance or vs noise level</div>
   </section>
@@ -311,44 +289,89 @@
     <h2>Control</h2>
     <p class="criterion">Controller design, tuning and tracking results</p>
 
-    <h3>Visual servoing (PBVS)</h3>
-    <p>
-      The camera's estimated 3D cube position is the target. The approach is: hover above the cube,
-      descend, close, lift, rotate to the bin, release, return home.
-    </p>
+    <h3>Controller design</h3>
+<p>
+  The controller turns the estimated state into joint commands in two layers. The outer layer is
+  position-based visual servoing (PBVS): the Kalman-filtered cube position is the target, and the gap
+  between the cube and the gripper becomes a desired velocity. A damped Jacobian inverse converts this
+  velocity into joint velocities, and a null-space term (joint motions that do not move the gripper)
+  keeps the elbow and wrists near the home pose.
+</p>
+<p>The inner layer is an LQR joint controller:</p>
+<div class="eq">u = −K(x̂ − x<sub>ref</sub>)</div>
+<p>
+  This takes how far each joint is from its target, multiplies it by the gains and applies that torque
+  to correct it. The gains K are calculated from the state-space model, and gravity compensation is
+  computed from the model at the estimated angles. This way, the gripper tip position, the Jacobian and
+  the joint states all come from the estimator and not the simulator's true values.
+</p>
 
-    <h3>Task-space loop</h3>
-    <p>Each step, the gripper-tip error is turned into joint motion with a damped Jacobian inverse:</p>
-    <div class="eq">v = k<sub>p</sub>(p<sub>target</sub> − p̂<sub>tcp</sub>), &nbsp;|v| ≤ 0.25 m/s &nbsp;&nbsp;&nbsp; q̇ = Jᵀ(JJᵀ + λ²I)⁻¹[v; k<sub>r</sub>e<sub>rot</sub>] + (I − J⁺J)q̇<sub>posture</sub></div>
-    <p>p̂<sub>tcp</sub> and J come from the estimated joint angles.</p>
+<h3>Tuning</h3>
+<ul>
+  <li><b>Tip and rotation gains:</b> k<sub>p</sub> = 5 s⁻¹ and k<sub>r</sub> = 5 s⁻¹ make position and orientation settle together within about a second.</li>
+  <li><b>Speed cap:</b> the tip speed is limited to 0.25 m/s to stop overshoot and keep a held cube from swinging.</li>
+  <li><b>Damping:</b> λ² = 10⁻⁴ is small enough not to slow normal motion, but keeps the arm stable near singular poses.</li>
+  <li><b>LQR weights:</b> Q = [ ] weights joint position error and R = [ ] weights torque. A heavier Q gives tighter, faster tracking but larger torques; a heavier R gives smoother, gentler motion with more lag. We chose [ ] because [ ].</li>
+</ul>
+<p>The controller is also kept slower than the estimator, so it doesn't react to encoder noise.</p>
 
-    <h3>State-space joint controller</h3>
-    <div class="todo">describe the joint controller (LQR or state feedback).</div>
-
-    <h3>Tuning values</h3>
-    <div class="table-scroll">
-      <table>
-        <tr><th>Parameter</th><th>Value</th><th>Reason</th></tr>
-        <tr><td>Position gain k<sub>p</sub></td><td>–</td><td>–</td></tr>
-        <tr><td>Rotation gain k<sub>r</sub></td><td>–</td><td>–</td></tr>
-        <tr><td>Damping λ</td><td>–</td><td>Stability near singular poses</td></tr>
-        <tr><td>Max tip speed</td><td>0.25 m/s</td><td>–</td></tr>
-        <tr><td>LQR Q / R or joint gains</td><td>–</td><td>–</td></tr>
-      </table>
-    </div>
-
+<h3>Tracking results</h3>
+<p>Over [N] picks:</p>
+<ul>
+  <li>the gripper tip tracked its path with an RMSE of [ ] mm and a maximum error of [ ] mm</li>
+  <li>it settled within 5 mm of its target in [ ] s</li>
+  <li>it finished with a grasp error of [ ] mm from the cube's true centre (ground truth used for evaluation only)</li>
+  <li>average control effort was [ ] N·m RMS joint torque</li>
+</ul>
+<p>
+  Comparing low, chosen and high gain settings showed the trade-off. Higher gains cut the error to [ ] mm
+  but raised effort by [ ]% and caused jitter. Lower gains were smoother but took [ ] s longer to settle.
+</p>
+ 
     <h3>Results</h3>
     <div class="grid2">
-      <div class="fig-ph">image of TCP tracking error vs time during a pick</div>
-      <div class="fig-ph">image of control effort (joint torque or command) vs time</div>
+      <div class="fig-ph">Figure: TCP tracking error vs time during a pick</div>
+      <div class="fig-ph">Figure: control effort (joint torque or command) vs time</div>
     </div>
-    <div class="todo">explain the settling time, final grasp position error (mm), and a gain trade-off (control effort vs tracking error) </div>
-  </section>
+    <div class="todo"><b>TODO:</b> report settling time, final grasp position error (mm), and a gain trade-off (control effort vs tracking error) </div>
 
-  <!-- ===================================================== E ROBUSTNESS -->
+  <!-- ROBUSTNESS -->
   <section id="robustness">
     <h2>Integration and robustness</h2>
     <p class="criterion">Performance under disturbance and noise</p>
+
+<h3>Integration</h3>
+<p>
+  Integration combines the camera, object detection, state estimation, controller, robot arm and gripper
+  into a full system that picks up cubes and places them into their matching trays.
+</p>
+<p>
+  A major part of this is passing information from one component to the next, so that the robot can react
+  when an object changes position. For example, to simulate randomisation, the red cube moves back and forth
+  continuously until it is picked up. The robot therefore has to keep using an updated position rather than
+  moving towards the position it first calculated. This tests whether the system can respond to disturbances
+  instead of relying only on its initial measurements.
+</p>
+<p>
+  The Kalman filters limit the effect of measurement noise, especially for moving objects, which improves the
+  consistency of both the cube position and joint state estimates. However, overall performance still depends
+  on the accuracy of each component, the communication between them, and the controller's ability to create
+  appropriate movements. The LQR controller currently calculates the control inputs [to be expanded].
+</p>
+
+<h3>Robustness</h3>
+<p>
+  Robustness is tested by varying the cube positions between trials and keeping the red cube moving
+  continuously, which shows that the system can handle changes to its environment. Measured by task success,
+  position accuracy and completion time, the system completed the task in [ ] of [ ] trials, which gives
+  confidence in how it performs.
+</p>
+<p>
+  The system could be improved further by adding tactile sensors to the gripper, which would confirm that the
+  robot has actually picked up a cube rather than inferring it, or a time-of-flight sensor alongside the camera
+  to double-check the camera's estimated distance to the object. These additions reflect real-world
+  applications and would make the system better suited to a hardware implementation.
+</p>
 
     <h3>Experiment setup</h3>
     <div class="todo">explain the number of trials per condition, how cube positions are randomised (x range, y strips, shuffled colours), and how success is measured (cube inside the matching bin, checked with ground truth in evaluation only).</div>
