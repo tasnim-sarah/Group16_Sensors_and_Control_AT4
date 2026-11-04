@@ -191,14 +191,6 @@
     </p>
     <div class="fig-ph">image of screenshot of the scene (robot, table, cubes, bins)</div>
 
-    <h3>Keeping ground truth out of the controller</h3>
-    <ul>
-      <li><b>Arm state:</b> the tool pose, Jacobian and camera pose are computed from the <i>estimated</i> joint angles, on a separate copy of the model.</li>
-      <li><b>Cube positions:</b> taken only from the camera (RGB-D detection, then the Kalman filter).</li>
-      <li><b>Grasp detection:</b> from the finger position sensors (a finger blocked short of its target means the cube is held), not from simulator contacts.</li>
-      <li><b>Gravity compensation:</b> computed from the robot model at the estimated state.</li>
-      <li><b>Evaluation:</b> the true cube and bin positions are read only in code marked <code>EVALUATION ONLY</code> to report whether each placement succeeded.</li>
-    </ul>
   </section>
 
   <!-- MODELLING -->

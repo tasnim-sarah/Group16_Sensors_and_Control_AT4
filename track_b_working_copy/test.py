@@ -21,6 +21,7 @@ from cameramodulekal import (
     camera_pose_from_joint_positions,
 )
 from controlfile import (
+    ConstantVelocityObserver,
     JointKalmanObserver,
     PositionActuatorLQRController,
     PositionActuatorStateSpaceModel,
@@ -46,7 +47,7 @@ CUBE_HALF = 0.02          # half a cube's size (m): the camera sees the front fa
 RED_AMPLITUDE = 0.06      # the red cube slides this far left and right (m)
 RED_PERIOD = 6.0          # seconds for the red cube to slide there and back
 LEAD_TIME = 0.15          # aim this far ahead of the moving red cube (s)
-PRINT_EVERY = 6         # print the red cube every 12th camera picture (6 x 1/30 s = 0.2 s)
+PRINT_EVERY = 6         # print the red cube every 6th camera picture (6 x 1/30 s = 0.2 s)
 
 LOOK_CUBES = np.array([0.35, 0.0, 0.03])   # where the camera looks at the start (x, y, z in m)
 HEADLESS = os.environ.get("HEADLESS", "0") == "1"
@@ -56,6 +57,16 @@ CAMERA_RENDER_HEIGHT = 240
 IK_POSITION_TOLERANCE = 0.010
 IK_ROTATION_TOLERANCE = 0.02
 TRAY_MEASUREMENT_TOLERANCE = 0.025
+GRIPPER_FORCE_MIN = 5.0     # N; simulated gripper force sensor threshold for "holding"
+LQR_POS_W = float(os.environ.get("LQR_POS_W", "20"))
+OBS_Q = float(os.environ.get("OBS_Q", "1e-5"))
+OBSERVER = os.environ.get("OBSERVER", "kf")                # "kf" = actuator-model Kalman, "cv" = constant velocity
+CV_ACCEL = float(os.environ.get("CV_ACCEL", "3.0"))        # rad/s^2, used only when OBSERVER=cv
+if OBSERVER not in ("kf", "cv"):
+    raise ValueError("OBSERVER must be 'kf' or 'cv'")
+DEPTH_NOISE_STD = float(os.environ.get("DEPTH_NOISE_STD", "0.0"))   # m, added to rendered depth (0 = noise-free)
+CAM_ACCEL = float(os.environ.get("CAM_ACCEL", "0.07"))              # m/s^2, camera Kalman process noise
+CAM_MEAS = float(os.environ.get("CAM_MEAS", "2.5e-5"))              # m^2, camera Kalman measurement variance
 
 CUBES = ["Red Cube", "Yellow Cube", "Blue Cube"]
 CUBE_TO_TRAY = {"Red Cube": "Pink Tray", "Yellow Cube": "Green Tray", "Blue Cube": "Purple Tray"}
@@ -232,12 +243,19 @@ encoder_rng = np.random.default_rng(
 )
 control_model = PositionActuatorStateSpaceModel(model, data)
 control_model.print_report()
-controller = PositionActuatorLQRController(control_model)
-observer = JointKalmanObserver(
-    control_model,
-    position_noise=ENCODER_NOISE_STD**2,
-    process_noise=1e-5,
-)
+controller = PositionActuatorLQRController(control_model, position_weight=LQR_POS_W)
+if OBSERVER == "cv":
+    observer = ConstantVelocityObserver(
+        control_model,
+        position_noise=ENCODER_NOISE_STD**2,
+        accel_noise=CV_ACCEL,
+    )
+else:
+    observer = JointKalmanObserver(
+        control_model,
+        position_noise=ENCODER_NOISE_STD**2,
+        process_noise=OBS_Q,
+    )
 q_est, dq_est = observer.reset(
     data.qpos[:6] + encoder_rng.normal(0.0, ENCODER_NOISE_STD, 6)
 )
@@ -264,6 +282,7 @@ object_localization_errors = {name: [] for name in (*CUBES, *TRAY_BODY.keys())}
 rejected_detection_counts = {name: 0 for name in object_localization_errors}
 localization_outlier_counts = {name: 0 for name in object_localization_errors}
 localization_axis_errors = {name: [] for name in object_localization_errors}
+depth_std_samples = {name: [] for name in object_localization_errors}
 actuator_saturation_counts = np.zeros(6, dtype=int)
 last_ik_diagnostics = None
 last_vision_frames = None
@@ -278,7 +297,14 @@ vision_display_times = []
 renderer = mujoco.Renderer(
     model, width=CAMERA_RENDER_WIDTH, height=CAMERA_RENDER_HEIGHT
 )
-sensor = CameraSensor(model, renderer)   # from cameramodulekal.py: finds colours + Kalman filter
+sensor = CameraSensor(
+    model,
+    renderer,
+    depth_noise_std=DEPTH_NOISE_STD,
+    depth_noise_seed=None if random_seed is None else random_seed + 2,
+    accel_noise=CAM_ACCEL,
+    meas_noise=CAM_MEAS,
+)   # from cameramodulekal.py: finds colours + Kalman filter
 vision_monitor = VisionMonitor(
     sensor.width, sensor.height, max_depth_m=sensor.max_depth_m
 )
@@ -354,6 +380,7 @@ def update_tracks():
     visible_targets = set(found)
     for name in found:
         track_last_seen[name] = data.time
+        depth_std_samples[name].append(found[name]["depth_std_m"])
         pos = found[name]["position_world_m"].copy()
         if name in CUBES:
             ray = pos - estimated_camera_pose[0]
@@ -772,55 +799,8 @@ def pick_and_place(cube, tray):
         print(f"  Aborting {cube}: {reason}")
         return finish(False)
 
-    def return_home_after_early_release():
-        global target, R_des, task_stage
-        task_stage = "Returning home after verified tray deposit"
-        target = None
-        R_des = R_HOME.copy()
-        if not goto(lambda: P_HOME, tol=0.02):
-            return abort("return-home move failed after the verified tray deposit")
-        rotate_base(HOME[0])
-        R_des = R_HOME.copy()
-        for name in CUBES:
-            tracks.pop(name, None)
-            track_last_seen.pop(name, None)
-            sensor.position_filters[name].reset()
-        task_stage = "Task complete"
-        print(f"<<< {cube} done")
-        return finish(True)
-
-    def accept_early_release():
-        nonlocal placed
-        global gripper_cmd, target, task_stage
-        if not carry_failure_detected:
-            return False
-        task_stage = "Verifying destination after carry loss"
-        target = None
-        gripper_cmd = GRIPPER_OPEN
-        wait(0.7)
-        cube_position = data.xpos[model.body(cube_body).id].copy()
-        tray_position = data.xpos[model.body(TRAY_BODY[tray]).id].copy()
-        in_tray = (
-            np.all(np.abs(cube_position[:2] - tray_position[:2]) <= 0.055)
-            and 0.0 <= cube_position[2] <= 0.12
-        )
-        print(
-            "  UNPLANNED RELEASE CHECK: "
-            f"{'cube settled in destination' if in_tray else 'cube outside destination'} "
-            f"(cube centre {np.round(cube_position, 3)})"
-        )
-        if in_tray:
-            placed = True
-            print("  PLACEMENT CHECK: PASS (cube settled in the verified destination)")
-            return True
-        return False
-
     def handle_carry_failure(reason):
-        if accept_early_release():
-            return return_home_after_early_release()
-        if carry_failure_detected:
-            return abort("cube was lost outside the destination during transfer", True)
-        return abort(reason)
+        return abort(reason, carry_failure_detected)
 
     def ensure_tray_localized():
         global target, R_des, task_stage
@@ -898,6 +878,7 @@ def pick_and_place(cube, tray):
     if cube == "Red Cube":                                       # the red cube stops sliding
         red_moving = False
         data.qvel[red_dadr:red_dadr + 6] = 0
+        sensor.position_filters[cube].reset()                    # it is stationary now, so relearn velocity = 0
     task_stage = "Settling over target"
     wait(0.5)                                                    # let the camera settle on a still cube
     spot = cube_xy(cube).copy()                                  # remember where the cube is
@@ -936,8 +917,9 @@ def pick_and_place(cube, tray):
     holding_cube = sensed_grasp                         # decision uses the sensor
     truth_holding = lift_height > 0.02                  # logged only, not used to decide
     picked = holding_cube
-    if holding_cube:                                             # evaluation from the finger position
+    if holding_cube != truth_holding:
         failure_causes.append(f"{cube}:sensed grasp disagrees with true lift")
+    if holding_cube:
         print(
             f"  Cube followed gripper: lift={lift_height:.3f}m "
             f"from {np.round(cube_before_lift, 3)} to {np.round(cube_after_lift, 3)}"
@@ -979,7 +961,11 @@ def pick_and_place(cube, tray):
                 cube_contact_pairs.add(name)
                 if "finger" in name:
                     finger_contacts.add(name)
-        carry_ok = drift <= 0.025 and bool(finger_contacts)
+        finger_q_now = data.qpos[FINGER_ADR]               # simulated finger encoder
+        carry_ok = (
+            0.008 < finger_q_now < GRIPPER_CLOSED - 0.004
+            and abs(data.actuator_force[6]) > GRIPPER_FORCE_MIN
+        )
         if not carry_ok:
             carry_failure_detected = True
         if stage != "in-transit carry check" or not carry_ok:
@@ -1052,15 +1038,15 @@ def pick_and_place(cube, tray):
         np.all(np.abs(cube_position[:2] - tray_position[:2]) <= 0.055)
         and 0.0 <= cube_position[2] <= 0.12
     )
-    placement_success = bool(holding_cube and in_tray)
-    placed = placement_success
+    truth_placed = bool(in_tray)                           # scoring only, never used to decide
+    placed = truth_placed
     print(
-        "  PLACEMENT CHECK: "
-        f"{'PASS' if placement_success else 'FAIL'} "
+        "  PLACEMENT CHECK (ground truth, scoring only): "
+        f"{'PASS' if truth_placed else 'FAIL'} "
         f"(cube centre {np.round(cube_position, 3)})"
     )
-    if not placement_success:
-        return abort("cube was released outside the matching tray")
+    if not truth_placed:
+        failure_causes.append(f"{cube}:released outside matching tray (truth)")
 
     tcp_position, _ = forward_kinematics(q_est)
     task_stage = "Returning home"
@@ -1079,7 +1065,7 @@ def pick_and_place(cube, tray):
         return abort("PBVS return-home move failed")
     task_stage = "Task complete"
     print(f"<<< {cube} done")
-    return finish(True)
+    return finish(placed)
 
 
 def recover_before_retry(cube):
@@ -1215,6 +1201,9 @@ if localization_errors:
             axis_err = np.asarray(localization_axis_errors[name])          
             print(f"    bias xyz (mm) {np.round(1000 * axis_err.mean(axis=0), 1)}  "   
                   f"std xyz (mm) {np.round(1000 * axis_err.std(axis=0), 1)}")          
+            if depth_std_samples[name]:
+                print(f"    mean depth std inside mask "
+                      f"{1000 * np.mean(depth_std_samples[name]):.2f} mm")
     rejected = {
         name: count for name, count in rejected_detection_counts.items() if count
     }
@@ -1307,6 +1296,10 @@ print(
     f"std={ENCODER_NOISE_STD:.4f} rad; red-cube motion amplitude "
     f"{RED_AMPLITUDE:.3f} m"
 )
+observer_nis_mean = float(np.nanmean(nis_samples)) if nis_samples else float("nan")
+print(f"Observer NIS mean: {observer_nis_mean:.2f} (expect about 6 for 6 measurements)")
+all_depth_std = [s for values in depth_std_samples.values() for s in values]
+depth_std_mean_mm = 1000 * float(np.mean(all_depth_std)) if all_depth_std else float("nan")
 
 results_path = Path(__file__).resolve().with_name("trial_results.csv")
 result_columns = [
@@ -1316,6 +1309,9 @@ result_columns = [
     "joint_estimation_rmse_rad", "pbvs_position_rmse_m",
     "localization_rmse_m", "camera_position_rmse_m",
     "actuator_model_residual_rmse", "encoder_noise_std_rad", "failure_causes",
+    "observer_nis_mean", "lqr_position_weight", "observer_process_noise", 
+    "observer_type", "cv_accel_noise",
+    "depth_noise_std_m", "camera_accel_noise", "camera_meas_noise", "depth_std_mean_mm",
 ]
 write_header = not results_path.exists()
 with results_path.open("a", newline="", encoding="utf-8") as results_file:
@@ -1341,6 +1337,15 @@ with results_path.open("a", newline="", encoding="utf-8") as results_file:
         "actuator_model_residual_rmse": model_residual_rmse,
         "encoder_noise_std_rad": ENCODER_NOISE_STD,
         "failure_causes": ";".join(failure_causes),
+        "observer_nis_mean": observer_nis_mean,            
+        "lqr_position_weight": LQR_POS_W,                  
+        "observer_process_noise": OBS_Q,                   
+        "observer_type": OBSERVER,
+        "cv_accel_noise": CV_ACCEL if OBSERVER == "cv" else "",
+        "depth_noise_std_m": DEPTH_NOISE_STD,
+        "camera_accel_noise": CAM_ACCEL,
+        "camera_meas_noise": CAM_MEAS,
+        "depth_std_mean_mm": depth_std_mean_mm,
     })
 print(f"Trial results appended to {results_path.name}")
 
