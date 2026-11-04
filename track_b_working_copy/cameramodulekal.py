@@ -464,16 +464,3 @@ class CameraSensor:
                 detections[label] = detection
 
         return detections
-
-
-# --------------------------------------------------
-# 5. SELECT A DETECTED OBJECT
-# --------------------------------------------------
-
-def selected_target(detections, name):
-    """
-    Examples:
-        selected_target(detections, "Red Cube")
-        selected_target(detections, "Pink Tray")
-    """
-    return detections.get(name)

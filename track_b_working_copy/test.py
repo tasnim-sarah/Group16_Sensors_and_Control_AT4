@@ -2,7 +2,8 @@
 Sorting robot: UR3e arm + wrist camera + gripper (MuJoCo).
 The camera finds the coloured cubes and trays, the arm picks each cube in the
 order you type and drops it into its matching tray.
-Run with:  python test.py
+Run with:  ORDER=r,b,y CUBE_SEED=23 python test.py
+Headless:  HEADLESS=1 MUJOCO_GL=egl ORDER=r,b,y CUBE_SEED=23 python test.py
 """
 import csv
 import os
@@ -45,10 +46,11 @@ CUBE_HALF = 0.02          # half a cube's size (m): the camera sees the front fa
 RED_AMPLITUDE = 0.06      # the red cube slides this far left and right (m)
 RED_PERIOD = 6.0          # seconds for the red cube to slide there and back
 LEAD_TIME = 0.15          # aim this far ahead of the moving red cube (s)
-PRINT_EVERY = 6           # print the red cube every 6th camera picture (6 x 1/30 s = 0.2 s)
+PRINT_EVERY = 6         # print the red cube every 12th camera picture (6 x 1/30 s = 0.2 s)
 
 LOOK_CUBES = np.array([0.35, 0.0, 0.03])   # where the camera looks at the start (x, y, z in m)
-VISION_MONITOR_ENABLED = True
+HEADLESS = os.environ.get("HEADLESS", "0") == "1"
+VISION_MONITOR_ENABLED = (not HEADLESS) and os.environ.get("VISION_MONITOR", "1") == "1"
 CAMERA_RENDER_WIDTH = 320
 CAMERA_RENDER_HEIGHT = 240
 IK_POSITION_TOLERANCE = 0.010
@@ -63,7 +65,6 @@ NAMES = {
     "r": "Red Cube", "red": "Red Cube",
     "y": "Yellow Cube", "yellow": "Yellow Cube",
     "b": "Blue Cube", "blue": "Blue Cube",
-    "g": "Green Cube", "green": "Green Cube",
 }
 
 
@@ -247,17 +248,22 @@ joint_reference_samples = []
 joint_truth_samples = []
 joint_estimate_samples = []
 joint_sample_times = []
-model_prediction_residuals = []
+nis_samples = []
+residual_actuator = []      # actual next state minus actuator-model prediction
+residual_cv = []            # actual next state minus constant-velocity prediction
+distance_from_home = []     # how far the arm was from HOME at each step (rad)
 away_from_home_samples = []
 camera_position_errors = []
 placement_results = []
 pick_results = []
 task_results = []
 last_failure_recoverable = False
+failure_causes = []
 pbvs_position_errors = []
 object_localization_errors = {name: [] for name in (*CUBES, *TRAY_BODY.keys())}
 rejected_detection_counts = {name: 0 for name in object_localization_errors}
 localization_outlier_counts = {name: 0 for name in object_localization_errors}
+localization_axis_errors = {name: [] for name in object_localization_errors}
 actuator_saturation_counts = np.zeros(6, dtype=int)
 last_ik_diagnostics = None
 last_vision_frames = None
@@ -276,7 +282,6 @@ sensor = CameraSensor(model, renderer)   # from cameramodulekal.py: finds colour
 vision_monitor = VisionMonitor(
     sensor.width, sensor.height, max_depth_m=sensor.max_depth_m
 )
-camera_id = model.camera("wrist_cam").id
 print(
     "Camera calibration: "
     f"fx={sensor.fx:.1f}px fy={sensor.fy:.1f}px "
@@ -291,8 +296,6 @@ track_last_seen = {}
 tray_anchors = {}
 target = None    # the object we are working on now: a cube name or a tray name
 visible_targets = set()
-rough_fallback_targets = set()
-
 
 def update_tracks():
     """Localise RGB-D detections with the camera pose from estimated-joint FK."""
@@ -350,7 +353,6 @@ def update_tracks():
     last_vision_frames = {"rgb": rgb, "depth": depth, "detections": found}
     visible_targets = set(found)
     for name in found:
-        rough_fallback_targets.discard(name)
         track_last_seen[name] = data.time
         pos = found[name]["position_world_m"].copy()
         if name in CUBES:
@@ -364,12 +366,13 @@ def update_tracks():
             object_truth = data.xpos[model.body(body_name).id]
             localization_error = float(np.linalg.norm(pos - object_truth))
             object_localization_errors[name].append(localization_error)
+            localization_axis_errors[name].append(pos - object_truth)
             if localization_error > 0.05:
                 localization_outlier_counts[name] += 1
         tracks[name] = pos
         velocity[name] = sensor.position_filters[name].kf.statePost[3:6, 0].astype(float)
     for name in tracks:
-        if name not in found and name not in rough_fallback_targets:
+        if name not in found:
             if name == "Red Cube" and red_moving:
                 filter_state = sensor.position_filters[name].kf.statePost[:, 0]
                 velocity[name] = filter_state[3:6].astype(float)
@@ -387,7 +390,6 @@ def target_tracking_usable():
     return (
         target is None
         or target in visible_targets
-        or target in rough_fallback_targets
         or data.time - track_last_seen.get(target, -np.inf) <= 3.0
     )
 
@@ -474,6 +476,13 @@ def inverse_kinematics(target_position, target_rotation, q_seed):
         rotation_error,
     )
 
+if os.environ.get("CHECK_REACH") == "1":
+    for tray_name, (x, y) in TRAY_XY.items():
+        for z in (HOVER_Z + 0.10, DROP_Z):
+            _, ok, pe, re = inverse_kinematics(np.array([x, y, z]), R_HOME, HOME)
+            print(f"{tray_name} z={z:.2f} r={np.hypot(x, y):.2f}m "
+                  f"ok={ok} pos_err={pe:.3f} rot_err={re:.3f}")
+    raise SystemExit
 
 def update_pbvs_reference():
     """Turn the latest filtered RGB-D target into a short Cartesian IK waypoint."""
@@ -507,12 +516,6 @@ def wrap(angle):
     return (angle + np.pi) % (2 * np.pi) - np.pi
 
 
-def azimuth(xy):
-    """The angle of a point as seen from the base."""
-    d = np.asarray(xy) - BASE_XY
-    return np.arctan2(d[1], d[0])
-
-
 step = 0
 
 
@@ -523,8 +526,6 @@ def update_vision_monitor():
     detection = last_vision_frames["detections"].get(target)
     if target is None:
         target_status = "IDLE"
-    elif target in rough_fallback_targets:
-        target_status = "FALLBACK"
     elif target in visible_targets:
         target_status = "VISIBLE"
     elif target in tracks and data.time - track_last_seen.get(target, -np.inf) <= 3.0:
@@ -563,8 +564,7 @@ def update_vision_monitor():
         stage=task_stage,
         q_estimated=q_est,
         q_ground_truth=data.qpos[:6],
-        observer_std=observer.position_standard_deviation(),
-        lqr_active=controller is not None,
+        observer_std=observer.position_standard_deviation()
     )
     vision_display_times.append(time.perf_counter() - monitor_started)
 
@@ -572,7 +572,7 @@ def update_vision_monitor():
 def step_sim():
     """Run one physics step with observer feedback and six-joint position LQR."""
     global step, q_est, dq_est, previous_control
-    if not viewer.is_running():
+    if viewer is not None and not viewer.is_running():
         raise SystemExit
 
     if red_moving:
@@ -584,6 +584,7 @@ def step_sim():
     encoder_q = data.qpos[:6] + encoder_rng.normal(0.0, ENCODER_NOISE_STD, 6)
     q_est, dq_est = observer.update(encoder_q, previous_control)
 
+    nis_samples.append(observer.last_nis)
     if step % DETECT_EVERY == 0:
         camera_frame_started = time.perf_counter()
         found = update_tracks()
@@ -597,12 +598,13 @@ def step_sim():
                       f"velocity {np.round(velocity['Red Cube'], 3)}")
             else:
                 print(f"t={data.time:5.2f}s  Red Cube not in view")
-        viewer.sync()
+        if viewer is not None:
+            viewer.sync()
         update_vision_monitor()
         remaining_frame_time = 1 / 30 - (
             time.perf_counter() - camera_frame_started
         )
-        if remaining_frame_time > 0:
+        if remaining_frame_time > 0 and not HEADLESS:
             time.sleep(remaining_frame_time)
 
     raw_position_command = controller.raw_command(q_reference, q_est, dq_est)
@@ -613,7 +615,7 @@ def step_sim():
     position_command = controller.command(q_reference, q_est, dq_est)
     data.ctrl[:6] = position_command
     previous_control = position_command.copy()
-    data.ctrl[6] = gripper_cmd                        # send the gripper command
+    data.ctrl[6] = gripper_cmd                   
     joint_reference_samples.append(q_reference.copy())
     joint_truth_samples.append(data.qpos[:6].copy())
     joint_estimate_samples.append(q_est.copy())
@@ -621,15 +623,19 @@ def step_sim():
     state_before_step = np.r_[data.qpos[:6], data.qvel[:6]].copy()
     control_before_step = position_command.copy()
     mujoco.mj_step(model, data)
+    actual_state = np.r_[data.qpos[:6], data.qvel[:6]]
     predicted_state = (
         control_model.A @ state_before_step
         + control_model.B @ control_before_step
         + control_model.offset
     )
-    actual_state = np.r_[data.qpos[:6], data.qvel[:6]]
-    model_prediction_residuals.append(
-        float(np.max(np.abs(actual_state - predicted_state)))
-    )
+    predicted_cv = np.r_[
+        state_before_step[:6] + dt * state_before_step[6:],   # position moves with velocity
+        state_before_step[6:],                                 # velocity stays the same
+    ]
+    residual_actuator.append(actual_state - predicted_state)
+    residual_cv.append(actual_state - predicted_cv)
+    distance_from_home.append(float(np.linalg.norm(state_before_step[:6] - HOME)))
     away_from_home_samples.append(bool(np.linalg.norm(q_reference - HOME) > 0.1))
     step += 1
 
@@ -762,6 +768,7 @@ def pick_and_place(cube, tray):
     def abort(reason, recoverable=False):
         global last_failure_recoverable
         last_failure_recoverable = recoverable
+        failure_causes.append(f"{cube}:{reason}")
         print(f"  Aborting {cube}: {reason}")
         return finish(False)
 
@@ -922,11 +929,15 @@ def pick_and_place(cube, tray):
     task_stage = "PBVS lift"
     if not goto(lambda: np.r_[tcp_position[:2], HOVER_Z], tol=0.015):
         return abort("PBVS lift failed; holding state is uncertain")
-    cube_after_lift = data.xpos[model.body(cube_body).id].copy()
-    lift_height = float(cube_after_lift[2] - cube_before_lift[2])
-    holding_cube = lift_height > 0.02
+    cube_after_lift = data.xpos[model.body(cube_body).id].copy()   # still needed below for held_offset
+    lift_height = float(cube_after_lift[2] - cube_before_lift[2])  # ground truth, printed only
+    finger_q = data.qpos[FINGER_ADR]                    # simulated finger encoder
+    sensed_grasp = 0.008 < finger_q < GRIPPER_CLOSED - 0.004   # stalled on a cube, not fully closed
+    holding_cube = sensed_grasp                         # decision uses the sensor
+    truth_holding = lift_height > 0.02                  # logged only, not used to decide
     picked = holding_cube
     if holding_cube:                                             # evaluation from the finger position
+        failure_causes.append(f"{cube}:sensed grasp disagrees with true lift")
         print(
             f"  Cube followed gripper: lift={lift_height:.3f}m "
             f"from {np.round(cube_before_lift, 3)} to {np.round(cube_after_lift, 3)}"
@@ -1054,6 +1065,7 @@ def pick_and_place(cube, tray):
     tcp_position, _ = forward_kinematics(q_est)
     task_stage = "Returning home"
     if not goto(lambda: np.r_[tcp_position[:2], DROP_Z], tol=0.015):
+        failure_causes.append(f"{cube}:retreat after placement failed")
         print("  PBVS retreat after placement did not reach its target")
         return finish(False)
     rotate_base(HOME[0])
@@ -1091,39 +1103,43 @@ def recover_before_retry(cube):
 # --------------------------------------------------
 # 5. RUN
 # --------------------------------------------------
-while True:
-    try:
-        order = parse_pick_order(
-            input("Pick order (e.g. 'r,b,y' or 'yellow red'): "),
-            CUBE_TO_TRAY,
-        )
-        break
-    except ValueError as error:
-        print(f"Invalid pick order: {error}")
-print("Order:", order)
 
-viewer = mujoco.viewer.launch_passive(model, data)    # open the window
+order_text = os.environ.get("ORDER")
+if order_text is not None:
+    order = parse_pick_order(order_text, CUBE_TO_TRAY)   # raises ValueError if invalid
+else:
+    while True:
+        try:
+            order = parse_pick_order(
+                input("Pick order (e.g. 'r,b,y' or 'yellow red'): "),
+                CUBE_TO_TRAY,
+            )
+            break
+        except ValueError as error:
+            print(f"Invalid pick order: {error}")
+print("Order:", order)
+    
+viewer = None if HEADLESS else mujoco.viewer.launch_passive(model, data)
 if VISION_MONITOR_ENABLED:
     vision_monitor.open()
 run_wall_start = time.perf_counter()
 for cube in order:
     completed = False
-    for attempt in range(1, 3):
-        print(f"Attempt {attempt}/2 for {cube}")
+    for attempt in range(1, 5):
+        print(f"Attempt {attempt}/4 for {cube}")
         if pick_and_place(cube, CUBE_TO_TRAY[cube]):
             completed = True
             break
-        if not last_failure_recoverable or attempt == 2:
+        if not last_failure_recoverable or attempt == 4:
             break
         if not recover_before_retry(cube):
             break
     task_results.append(completed)
     if not completed:
-        print(
-            f"SEQUENCE STOPPED: {cube} was not fully sorted; "
-            "later cubes will not be attempted."
-        )
-        break
+        print(f"{cube} not sorted; continuing with the next cube.")
+        if not recover_before_retry(cube):
+            print("Could not return HOME; stopping the sequence.")
+            break
 run_wall_seconds = time.perf_counter() - run_wall_start
 all_requested_completed = len(task_results) == len(order) and all(task_results)
 print("\nAll requested cubes sorted." if all_requested_completed else
@@ -1196,6 +1212,9 @@ if localization_errors:
                 f"(max {max(errors):.5f}m, {len(errors)} detections, "
                 f"{localization_outlier_counts[name]} errors > 0.05m)"
             )
+            axis_err = np.asarray(localization_axis_errors[name])          
+            print(f"    bias xyz (mm) {np.round(1000 * axis_err.mean(axis=0), 1)}  "   
+                  f"std xyz (mm) {np.round(1000 * axis_err.std(axis=0), 1)}")          
     rejected = {
         name: count for name, count in rejected_detection_counts.items() if count
     }
@@ -1214,21 +1233,33 @@ if pbvs_position_errors:
 else:
     pbvs_rmse = float("nan")
 model_residual_rmse = float("nan")
-if model_prediction_residuals:
-    residuals = np.asarray(model_prediction_residuals)
-    model_residual_rmse = float(np.sqrt(np.mean(residuals**2)))
+if residual_actuator:
+    ra = np.asarray(residual_actuator)
+    rc = np.asarray(residual_cv)
+    dist = np.asarray(distance_from_home)
     away_mask = np.asarray(away_from_home_samples, dtype=bool)
+
+    def rms(x):
+        return float(np.sqrt(np.mean(x ** 2)))
+
+    # CSV value: per-step worst-case state error, then RMS (same as the old list)
+    per_step_max = np.max(np.abs(ra), axis=1)
+    model_residual_rmse = rms(per_step_max)
+    msg = f"Position-actuator model one-step residual: {model_residual_rmse:.3e} overall"
     if np.any(away_mask):
-        print(
-            "Position-actuator model one-step residual: "
-            f"{np.sqrt(np.mean(residuals**2)):.3e} overall; "
-            f"{np.sqrt(np.mean(residuals[away_mask]**2)):.3e} away from HOME"
-        )
-    else:
-        print(
-            "Position-actuator model one-step residual: "
-            f"{np.sqrt(np.mean(residuals**2)):.3e} overall"
-        )
+        msg += f"; {rms(per_step_max[away_mask]):.3e} away from HOME"
+    print(msg)
+
+    print("Model one-step residual (position rad / velocity rad/s):")
+    for label, r in (("actuator model", ra), ("constant velocity", rc)):
+        print(f"  {label:18s} pos {rms(r[:, :6]):.2e}   vel {rms(r[:, 6:]):.2e}")
+    edges = [0.0, 0.1, 0.5, 1.0, np.inf]
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        m = (dist >= lo) & (dist < hi)
+        if m.any():
+            print(f"  {lo:.1f}-{hi:.1f} rad from HOME ({int(m.sum())} samples): "
+                  f"actuator vel {rms(ra[m, 6:]):.2e}   cv vel {rms(rc[m, 6:]):.2e}")
+
 if VISION_MONITOR_ENABLED:
     print(
         "Vision performance: "
@@ -1284,7 +1315,7 @@ result_columns = [
     "pick_successes", "placement_successes", "joint_tracking_rmse_rad",
     "joint_estimation_rmse_rad", "pbvs_position_rmse_m",
     "localization_rmse_m", "camera_position_rmse_m",
-    "actuator_model_residual_rmse", "encoder_noise_std_rad",
+    "actuator_model_residual_rmse", "encoder_noise_std_rad", "failure_causes",
 ]
 write_header = not results_path.exists()
 with results_path.open("a", newline="", encoding="utf-8") as results_file:
@@ -1309,10 +1340,12 @@ with results_path.open("a", newline="", encoding="utf-8") as results_file:
         "camera_position_rmse_m": camera_rmse,
         "actuator_model_residual_rmse": model_residual_rmse,
         "encoder_noise_std_rad": ENCODER_NOISE_STD,
+        "failure_causes": ";".join(failure_causes),
     })
 print(f"Trial results appended to {results_path.name}")
 
 renderer.close()
 if VISION_MONITOR_ENABLED:
     vision_monitor.close()
-viewer.close()
+if viewer is not None:
+    viewer.close()

@@ -45,76 +45,6 @@ def matrix_rank_report(A, B, C, tolerance=None):
         "observable": rank_obsv == n,
     }
 
-
-class UR3eStateSpaceModel:
-    """
-    Approximate six-joint double-integrator model.
-
-    State:
-        x = [q1...q6, dq1...dq6]
-        q  = joint angles (rad)
-        dq = joint velocities (rad/s)
-
-    Input:
-        u = six virtual joint accelerations (rad/s^2)
-
-    Output:
-        y = six measured joint angles (rad)
-
-    This is a teaching/analysis model, not a full nonlinear MuJoCo dynamics model.
-    """
-
-    def __init__(self, dt):
-        if dt <= 0:
-            raise ValueError("dt must be positive")
-
-        self.dt = float(dt)
-        n = 6
-        I = np.eye(n)
-        Z = np.zeros((n, n))
-
-        self.A = np.block([
-            [I, self.dt * I],
-            [Z, I],
-        ])
-
-        self.B = np.vstack([
-            0.5 * self.dt**2 * I,
-            self.dt * I,
-        ])
-
-        self.C = np.hstack([I, Z])
-        self.D = np.zeros((6, 6))
-        self.offset = np.zeros(12)
-        self.nominal_state = np.zeros(12)
-        self.nominal_input = np.zeros(6)
-
-    def analyse(self):
-        """Return the controllability and observability test results."""
-        return matrix_rank_report(self.A, self.B, self.C)
-
-    def print_report(self):
-        """Print a short report suitable for project testing."""
-        report = self.analyse()
-        print("\n--- UR3e approximate state-space model ---")
-        print("State x = [joint positions, joint velocities]")
-        print("Input u = virtual joint acceleration")
-        print("Output y = measured joint positions")
-        print(f"State matrix A shape: {self.A.shape}")
-        print(f"Input matrix B shape: {self.B.shape}")
-        print(f"Output matrix C shape: {self.C.shape}")
-        print(
-            f"Controllability rank: {report['controllability_rank']}/"
-            f"{report['number_of_states']} -> {report['controllable']}"
-        )
-        print(
-            f"Observability rank: {report['observability_rank']}/"
-            f"{report['number_of_states']} -> {report['observable']}"
-        )
-        print("Reminder: these results apply to this approximate model.")
-        return report
-
-
 class PositionActuatorStateSpaceModel:
     """Local discrete model of the six MuJoCo UR3e position-servo actuators.
 
@@ -230,7 +160,7 @@ class JointKalmanObserver:
     instead of directly using MuJoCo qvel. This makes the observer's role clear.
     """
 
-    def __init__(self, model, position_noise=1e-5, process_noise=1e-4):
+    def __init__(self, model, position_noise=2.5e-7, process_noise=1e-5):
         self.A = model.A.copy()
         self.B = model.B.copy()
         self.C = model.C.copy()
@@ -347,45 +277,6 @@ class PositionActuatorLQRController:
             self.model.ctrl_limits[:, 1],
         )
 
-
-class JointLQRController:
-    """
-    LQR controller for the approximate double-integrator model.
-
-    This class calculates virtual acceleration:
-        u = -K [q - q_reference, dq]
-
-    It is included for model/controller study. It does NOT directly drive the
-    existing MuJoCo position actuators. Validate a position-actuator interface
-    before using it to move the arm.
-    """
-
-    def __init__(self, model, position_weight=20.0, velocity_weight=2.0,
-                 input_weight=0.5):
-        self.model = model
-
-        Q = np.diag(
-            [position_weight] * 6 + [velocity_weight] * 6
-        )
-        R = np.eye(6) * input_weight
-
-        self.K, self.P = solve_discrete_lqr(
-            model.A, model.B, Q, R
-        )
-
-    def acceleration(self, q_reference, q_estimated, dq_estimated):
-        """Return the six virtual acceleration commands (rad/s^2)."""
-        q_reference = np.asarray(q_reference, dtype=float).reshape(6)
-        q_estimated = np.asarray(q_estimated, dtype=float).reshape(6)
-        dq_estimated = np.asarray(dq_estimated, dtype=float).reshape(6)
-
-        state_error = np.r_[
-            q_estimated - q_reference,
-            dq_estimated
-        ]
-        return -self.K @ state_error
-
-
 def tracking_metrics(reference, measured):
     """
     Calculate joint-position RMSE and maximum absolute error.
@@ -408,20 +299,3 @@ def tracking_metrics(reference, measured):
         "max_abs_error_rad": float(np.max(np.abs(error))),
         "rmse_per_joint_rad": np.sqrt(np.mean(error**2, axis=0)),
     }
-
-
-if __name__ == "__main__":
-    # Run this file directly to check the model and matrix ranks.
-    model = UR3eStateSpaceModel(dt=1.0 / 30.0)
-    model.print_report()
-
-    observer = JointKalmanObserver(model)
-    q_example = np.zeros(6)
-    q_est, dq_est = observer.update(q_example)
-    print("\nExample observer output:")
-    print("Estimated joint positions:", np.round(q_est, 4))
-    print("Estimated joint velocities:", np.round(dq_est, 4))
-
-    controller = JointLQRController(model)
-    print("LQR gain matrix shape:", controller.K.shape)
-    print("This model's LQR output is virtual acceleration, not motor position.")
