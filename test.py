@@ -3,6 +3,13 @@ Sorting robot: UR3e arm + wrist camera + gripper (MuJoCo).
 The camera finds the coloured cubes and trays, the arm picks each cube in the
 order you type and drops it into its matching tray.
 Run with:  mjpython test_simple.py
+
+NO GROUND TRUTH IN THE CONTROLLER
+  data = the real (simulated) world. Only the physics, the camera image, the
+         joint sensors and lines marked EVALUATION ONLY read it.
+  est  = the robot's own copy of the model. It only ever holds ESTIMATED joint
+         angles (noisy encoders -> Kalman observer). The gripper position, the
+         Jacobian and the camera pose used by the controller all come from est.
 """
 import time
 from pathlib import Path
@@ -12,6 +19,10 @@ import mujoco
 import mujoco.viewer
 
 from Sensors_Control_Mech_Systems.Group16_Sensors_and_Control_AT4.cameramodulekal import CameraSensor, add_wrist_camera, aim_camera_once
+try:   # same folder as the camera module; fall back to a plain import
+    from Sensors_Control_Mech_Systems.Group16_Sensors_and_Control_AT4.assessment_control import UR3eStateSpaceModel, JointKalmanObserver
+except ImportError:
+    from assessment_control import UR3eStateSpaceModel, JointKalmanObserver
 
 # --------------------------------------------------
 # SETTINGS (change these to play around)
@@ -30,11 +41,16 @@ RED_AMPLITUDE = 0.06      # the red cube slides this far left and right (m)
 RED_PERIOD = 6.0          # seconds for the red cube to slide there and back
 LEAD_TIME = 0.15          # aim this far ahead of the moving red cube (s)
 PRINT_EVERY = 6           # print the red cube every 6th camera picture (6 x 1/30 s = 0.2 s)
+GRASP_TOL = 0.004         # NEW: how close the tip must get before closing (m)
+MAX_ATTEMPTS = 3          # NEW: grasp attempts per cube before giving up
+ENCODER_NOISE_STD = 0.0005   # NEW: arm encoder noise (rad)
+FINGER_NOISE_STD = 0.0001    # NEW: finger position sensor noise (m)
 
 LOOK_CUBES = np.array([0.35, 0.0, 0.03])   # where the camera looks at the start (x, y, z in m)
 
 CUBES = ["Red Cube", "Yellow Cube", "Blue Cube"]
 CUBE_TO_TRAY = {"Red Cube": "Pink Tray", "Yellow Cube": "Green Tray", "Blue Cube": "Purple Tray"}
+CUBE_BODY = {"Red Cube": "red_cube", "Yellow Cube": "yellow_cube", "Blue Cube": "blue_cube"}   # EVALUATION ONLY
 TRAY_BODY = {"Pink Tray": "red_bin", "Green Tray": "yellow_bin", "Purple Tray": "blue_bin"}
 TRAY_XY = {"Pink Tray": (0.32, 0.28), "Green Tray": (0.00, 0.40), "Purple Tray": (0.16, 0.36)}
 NAMES = {"red": "Red Cube", "yellow": "Yellow Cube", "blue": "Blue Cube"}
@@ -91,19 +107,33 @@ def add_gripper(spec):
 
 
 add_gripper(spec)
-model = spec.compile()           # turn the description into a model
-data = mujoco.MjData(model)      # data holds the live state (joint angles, positions, ...)
 
-# start with the arm in its HOME pose
+# NEW: joint position sensors (encoders). The controller reads these, never data.qpos.
+ARM_JOINTS = ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
+              "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"]
+for jn in ARM_JOINTS + ["finger_left"]:
+    spec.add_sensor(name=f"enc_{jn}", type=mujoco.mjtSensor.mjSENS_JOINTPOS,
+                    objtype=mujoco.mjtObj.mjOBJ_JOINT, objname=jn)
+
+model = spec.compile()           # turn the description into a model
+data = mujoco.MjData(model)      # the REAL world: live state of the simulation
+est = mujoco.MjData(model)       # NEW: the robot's own copy, filled only with estimates
+
+ARM_SENS = [int(model.sensor_adr[model.sensor(f"enc_{jn}").id]) for jn in ARM_JOINTS]
+FINGER_SENS = int(model.sensor_adr[model.sensor("enc_finger_left").id])
+FINGER_ADR = int(model.jnt_qposadr[model.joint("finger_left").id])
+FINGER_R_ADR = int(model.jnt_qposadr[model.joint("finger_right").id])
+
+# start with the arm in its HOME pose (scene setup)
 HOME = np.array([-1.5708, -1.5708, 1.5708, -1.5708, -1.5708, 0.])
 data.qpos[:6] = HOME
 data.ctrl[:6] = HOME
 
-# move the trays to the spots in TRAY_XY
+# move the trays to the spots in TRAY_XY (scene setup)
 for tray, (x, y) in TRAY_XY.items():
     model.body_pos[model.body(TRAY_BODY[tray]).id][:2] = [x, y]
 
-# put the cubes at random spots. Each cube gets its own strip of y values (side to side),
+# put the cubes at random spots (scene setup). Each cube gets its own strip of y values,
 # and which colour gets which strip is shuffled, so the cubes never touch.
 rng = np.random.default_rng()                             # new random numbers every run
 strips = [(0.10, 0.15), (-0.025, 0.025), (-0.15, -0.10)]
@@ -113,18 +143,52 @@ for joint, (ymin, ymax) in zip(["red_cube_joint", "yellow_cube_joint", "blue_cub
     data.qpos[adr] = rng.uniform(0.28, 0.35)              # x (forwards)
     data.qpos[adr + 1] = rng.uniform(ymin, ymax)          # y (sideways)
 
-mujoco.mj_forward(model, data)                            # update everything after our changes
-aim_camera_once(model, data, LOOK_CUBES)                  # tilt the camera towards the cubes
+mujoco.mj_forward(model, data)                            # update the simulator after our changes
 
-# remember a few things about the arm
-BASE_XY = data.xanchor[0][:2].copy()                      # x, y of the base joint
+# --------------------------------------------------
+# NEW: SENSING AND STATE ESTIMATION (no ground truth past this point)
+# --------------------------------------------------
+dt = model.opt.timestep          # length of one physics step (s)
+noise_rng = np.random.default_rng()
+finger_meas = 0.0                # latest measured finger position (m)
+
+
+def read_encoders():
+    """Noisy encoder readings: what a real robot would measure."""
+    q = np.array(data.sensordata[ARM_SENS]) + noise_rng.normal(0, ENCODER_NOISE_STD, 6)
+    f = float(data.sensordata[FINGER_SENS]) + noise_rng.normal(0, FINGER_NOISE_STD)
+    return q, f
+
+
+joint_model = UR3eStateSpaceModel(dt)            # from assessment_control.py
+observer = JointKalmanObserver(joint_model, position_noise=ENCODER_NOISE_STD**2)
+
+
+def sense_and_estimate():
+    """Encoders -> Kalman observer -> forward kinematics on the robot's own model."""
+    global finger_meas
+    q_meas, finger_meas = read_encoders()
+    q_hat, dq_hat = observer.update(q_meas)
+    est.qpos[:6] = q_hat
+    est.qpos[FINGER_ADR] = finger_meas
+    est.qpos[FINGER_R_ADR] = finger_meas
+    est.time = data.time
+    mujoco.mj_forward(model, est)                # gripper pose, Jacobian, camera pose from ESTIMATES
+
+
+observer.reset(read_encoders()[0])
+sense_and_estimate()
+aim_camera_once(model, est, LOOK_CUBES)          # tilt the camera towards the cubes (estimated pose)
+mujoco.mj_forward(model, data)                   # simulator side: real camera follows the new aim
+
+# remember a few things about the arm (from the ESTIMATE)
+BASE_XY = est.xanchor[0][:2].copy()                       # x, y of the base joint (fixed mount)
 site_id = model.site("tcp").id
-FINGER_ADR = int(model.jnt_qposadr[model.joint("finger_left").id])
-R_HOME = data.site_xmat[site_id].reshape(3, 3).copy()     # the direction the gripper points at HOME
+R_HOME = est.site_xmat[site_id].reshape(3, 3).copy()      # the direction the gripper points at HOME
 R_des = R_HOME.copy()                                     # the direction we want to keep
-P_HOME = data.site_xpos[site_id].copy()                   # tcp position at HOME
+P_HOME = est.site_xpos[site_id].copy()                    # tcp position at HOME
 
-# the red cube slides, so remember its joint and its starting y
+# the red cube slides (the ENVIRONMENT moves it, the robot does not know this)
 red_joint = model.joint("red_cube_joint")
 red_qadr = int(model.jnt_qposadr[red_joint.id])
 red_dadr = int(model.jnt_dofadr[red_joint.id])
@@ -135,7 +199,6 @@ q_cmd = HOME.copy()              # joint angles we ask the arm to go to
 gripper_cmd = GRIPPER_OPEN       # gripper command we ask for
 jacp = np.zeros((3, model.nv))   # space for the Jacobian (position part)
 jacr = np.zeros((3, model.nv))   # space for the Jacobian (rotation part)
-dt = model.opt.timestep          # length of one physics step (s)
 DETECT_EVERY = round(1 / 30 / dt)   # take a camera picture every this many steps (30 per second)
 
 # --------------------------------------------------
@@ -160,13 +223,15 @@ def look_at():
 
 def update_tracks():
     """Take one camera picture and update where everything is."""
-    aim_camera_once(model, data, look_at())           # point the camera
-    rgb, depth = sensor.capture(data)                 # take a colour and a depth picture
-    found = sensor.detect(data, rgb, depth)           # find the coloured objects and smooth them (Kalman)
+    aim_camera_once(model, est, look_at())            # point the camera (from the ESTIMATED wrist pose)
+    mujoco.mj_forward(model, data)                    # simulator side: render from the new aim
+    rgb, depth = sensor.capture(data)                 # picture of the real world
+    found = sensor.detect(est, rgb, depth)            # pixel -> world with the ESTIMATED camera pose
+    cam_pos = est.cam_xpos[sensor.cam_id]
     for name in found:
         pos = found[name]["position_world_m"].copy()
         if name in CUBES:                             # the camera sees the front face of a cube,
-            ray = pos - data.cam_xpos[sensor.cam_id]  # so move the point half a cube further away
+            ray = pos - cam_pos                       # so move the point half a cube further away
             pos = pos + CUBE_HALF * ray / np.linalg.norm(ray)
         tracks[name] = pos
         velocity[name] = sensor.position_filters[name].kf.statePost[3:6, 0].astype(float)
@@ -185,28 +250,34 @@ def cube_xy(name):
 
 
 # --------------------------------------------------
-# 3. MOVING THE ARM
+# 3. MOVING THE ARM (everything here uses est, never data)
 # --------------------------------------------------
+def tip():
+    """Estimated gripper tip position."""
+    return est.site_xpos[site_id].copy()
+
+
 def servo(point):
     """Nudge the arm one small step so the gripper tip moves towards `point`."""
-    mujoco.mj_jacSite(model, data, jacp, jacr, site_id)
+    mujoco.mj_jacSite(model, est, jacp, jacr, site_id)
     J = np.vstack([jacp[:, :6], jacr[:, :6]])         # Jacobian: how joint speeds change the tip's speed
 
-    vel = 5.0 * (point - data.site_xpos[site_id])     # move faster when further away
+    vel = 5.0 * (point - est.site_xpos[site_id])      # move faster when further away
     if np.linalg.norm(vel) > MAX_SPEED:               # ...but never faster than MAX_SPEED
         vel *= MAX_SPEED / np.linalg.norm(vel)
 
-    R = data.site_xmat[site_id].reshape(3, 3)         # which way the gripper points now
+    R = est.site_xmat[site_id].reshape(3, 3)          # which way the gripper points now
     rot_err = 0.5 * sum(np.cross(R[:, i], R_des[:, i]) for i in range(3))   # how far it is from the wanted direction
 
     twist = np.r_[vel, 5.0 * rot_err]                 # wanted motion: move + keep pointing down
     J_inv = J.T @ np.linalg.inv(J @ J.T + 1e-4 * np.eye(6))   # "inverse" of the Jacobian
     dq = J_inv @ twist                                # joint speeds that give that motion
-    posture = np.r_[0.0, HOME[1:6] - data.qpos[1:6]]  # gently pull the elbow and wrists back to HOME
+    q_hat = est.qpos[:6]
+    posture = np.r_[0.0, HOME[1:6] - q_hat[1:6]]      # gently pull the elbow and wrists back to HOME
     dq += (np.eye(6) - J_inv @ J) @ posture           # ...without disturbing the tip
 
-    # new joint targets, never too far ahead of where the arm really is
-    q_cmd[:] = np.clip(q_cmd + dq * dt, data.qpos[:6] - 0.3, data.qpos[:6] + 0.3)
+    # new joint targets, never too far ahead of where the arm is estimated to be
+    q_cmd[:] = np.clip(q_cmd + dq * dt, q_hat - 0.3, q_hat + 0.3)
 
 
 def wrap(angle):
@@ -224,12 +295,12 @@ step = 0
 
 
 def step_sim():
-    """Run ONE physics step: slide the red cube, take a camera picture, move the motors."""
+    """Run ONE physics step: slide the red cube, take a camera picture, move the motors, re-sense."""
     global step
     if not viewer.is_running():                       # window closed: stop the program
         raise SystemExit
 
-    if red_moving:                                    # red cube slides left and right
+    if red_moving:                                    # ENVIRONMENT: red cube slides left and right
         w = 2 * np.pi / RED_PERIOD
         data.qpos[red_qadr + 1] = red_y0 + RED_AMPLITUDE * np.sin(w * data.time)
         data.qvel[red_dadr + 1] = RED_AMPLITUDE * w * np.cos(w * data.time)
@@ -250,6 +321,7 @@ def step_sim():
     data.ctrl[:6] = q_cmd                             # send the joint targets to the arm motors
     data.ctrl[6] = gripper_cmd                        # send the gripper command
     mujoco.mj_step(model, data)                       # move the physics forward one step
+    sense_and_estimate()                              # NEW: read the encoders and update the estimate
     step += 1
 
 
@@ -258,18 +330,24 @@ def goto(get_target, tol=0.01):
     start = data.time
     while data.time - start < 12:                     # give up after 12 seconds
         point = get_target()
-        if np.linalg.norm(data.site_xpos[site_id] - point) < tol:
-            break
+        if np.linalg.norm(tip() - point) < tol:
+            return True
+        servo(point)
+        step_sim()
+    return False
+
+
+def hold(point, seconds):
+    """NEW: keep servoing to `point` for a while, so the tip finishes settling ON the target."""
+    start = data.time
+    while data.time - start < seconds:
         servo(point)
         step_sim()
 
 
 def wait(seconds):
-    """Hold the gripper still for a while."""
-    start = data.time
-    while data.time - start < seconds:
-        servo(data.site_xpos[site_id].copy())
-        step_sim()
+    """Hold the gripper still where it is for a while."""
+    hold(tip(), seconds)
 
 
 def rotate_base(pan_target):
@@ -281,7 +359,20 @@ def rotate_base(pan_target):
     start = data.time
     while data.time - start < 0.5:                    # let the arm settle
         step_sim()
-    R_des = data.site_xmat[site_id].reshape(3, 3).copy()
+    R_des = est.site_xmat[site_id].reshape(3, 3).copy()
+
+
+def holding_cube():
+    """Fingers stopped early (measured by the finger sensor) = something is between them."""
+    return finger_meas < FINGER_TRAVEL - 0.005
+
+
+def print_eval(cube, spot):
+    """EVALUATION ONLY: compare the camera target and the gripper with the cube's TRUE position."""
+    true_xy = data.body(CUBE_BODY[cube]).xpos[:2]
+    true_tip = data.site_xpos[site_id][:2]
+    print(f"  [EVAL] camera target error {1000 * np.linalg.norm(spot - true_xy):.1f} mm, "
+          f"gripper error {1000 * np.linalg.norm(true_tip - true_xy):.1f} mm")
 
 
 # --------------------------------------------------
@@ -294,28 +385,44 @@ def pick_and_place(cube, tray):
     while cube not in tracks:                         # wait until the camera has seen it
         step_sim()
 
-    gripper_cmd = GRIPPER_OPEN
-    goto(lambda: np.r_[cube_xy(cube), HOVER_Z], tol=0.012)       # 1. fly above the cube (follows it)
+    held = False
+    for attempt in range(1, MAX_ATTEMPTS + 1):        # NEW: retry if the grasp misses
+        gripper_cmd = GRIPPER_OPEN
+        goto(lambda: np.r_[cube_xy(cube), HOVER_Z], tol=0.012)   # 1. fly above the cube (follows it)
 
-    if cube == "Red Cube":                                       # the red cube stops sliding
-        red_moving = False
-        data.qvel[red_dadr:red_dadr + 6] = 0
-    wait(0.5)                                                    # let the camera settle on a still cube
-    spot = cube_xy(cube).copy()                                  # remember where the cube is
+        if cube == "Red Cube" and red_moving:                     # the red cube stops sliding
+            red_moving = False
+            data.qvel[red_dadr:red_dadr + 6] = 0                  # ENVIRONMENT
+        wait(0.5)                                                 # let the camera settle on a still cube
+        spot = cube_xy(cube).copy()                               # remember where the cube is
 
-    goto(lambda: np.r_[spot, GRASP_Z], tol=0.008)                # 2. go straight down
-    gripper_cmd = GRIPPER_CLOSED                                 # 3. close the gripper
-    wait(0.8)
-    goto(lambda: np.r_[data.site_xpos[site_id][:2], HOVER_Z], tol=0.015)   # 4. lift up
-    if data.qpos[FINGER_ADR] < FINGER_TRAVEL - 0.005:            # fingers stopped early = holding a cube
-        print("  holding the cube")
-    else:
-        print("  MISSED the cube")
+        grasp_point = np.r_[spot, GRASP_Z]
+        goto(lambda: grasp_point, tol=GRASP_TOL)                  # 2. go straight down
+        hold(grasp_point, 0.4)                                    # NEW: finish settling ON the target
+        print_eval(cube, spot)                                    # EVALUATION ONLY
+        gripper_cmd = GRIPPER_CLOSED                              # 3. close the gripper
+        hold(grasp_point, 0.8)                                    # NEW: stay on target while closing
+        goto(lambda: np.r_[tip()[:2], HOVER_Z], tol=0.015)        # 4. lift up
+
+        if holding_cube():
+            print(f"  holding the cube (attempt {attempt})")
+            held = True
+            break
+        print(f"  MISSED the cube (attempt {attempt}) - trying again")
+        gripper_cmd = GRIPPER_OPEN
+        wait(0.5)
+
+    if not held:
+        print(f"  gave up on {cube} after {MAX_ATTEMPTS} attempts")
+        gripper_cmd = GRIPPER_OPEN
+        target = None
+        goto(lambda: P_HOME, tol=0.02)
+        return False
 
     target = tray                                                # the camera now looks at the tray
     tracks.pop(tray, None)                                       # forget old tray position
     sensor.position_filters[tray].reset()                        # start the Kalman filter fresh
-    turn = wrap(azimuth(BIN_AREA[tray][:2]) - azimuth(data.site_xpos[site_id][:2]))
+    turn = wrap(azimuth(BIN_AREA[tray][:2]) - azimuth(tip()[:2]))
     rotate_base(q_cmd[0] + turn)                                 # 5. turn towards the tray
 
     start = data.time
@@ -326,17 +433,24 @@ def pick_and_place(cube, tray):
         tracks[tray] = BIN_AREA[tray].copy()
 
     goto(lambda: np.r_[tracks[tray][:2], DROP_Z], tol=0.012)     # 6. move over the tray
+    hold(np.r_[tracks[tray][:2], DROP_Z], 0.4)                   # NEW: settle over the tray before letting go
     gripper_cmd = GRIPPER_OPEN                                   # ...and let go
     wait(0.7)
 
-    goto(lambda: np.r_[data.site_xpos[site_id][:2], DROP_Z], tol=0.015)   # 7. up, turn back, go home
+    goto(lambda: np.r_[tip()[:2], DROP_Z], tol=0.015)            # 7. up, turn back, go home
     rotate_base(HOME[0])
     R_des = R_HOME.copy()
     target = None
     for name in CUBES:                                           # cubes were out of view: start their filters fresh
         sensor.position_filters[name].reset()
     goto(lambda: P_HOME, tol=0.02)
-    print(f"<<< {cube} done")
+
+    # EVALUATION ONLY: did the cube really end up in its tray?
+    cube_pos = data.body(CUBE_BODY[cube]).xpos
+    tray_pos = data.body(TRAY_BODY[tray]).xpos
+    placed = bool(np.all(np.abs(cube_pos[:2] - tray_pos[:2]) < 0.05))
+    print(f"<<< {cube} done - [EVAL] placement {'PASS' if placed else 'FAIL'}")
+    return placed
 
 
 # --------------------------------------------------
@@ -346,10 +460,15 @@ words = input("Pick order (e.g. 'red blue yellow'): ").lower().split()
 order = [NAMES[word] for word in words]
 print("Order:", order)
 
+results = {}
 viewer = mujoco.viewer.launch_passive(model, data)    # open the window
 for cube in order:
-    pick_and_place(cube, CUBE_TO_TRAY[cube])
-print("\nAll cubes sorted.")
+    results[cube] = pick_and_place(cube, CUBE_TO_TRAY[cube])
+
+print("\n=== SUMMARY (evaluation) ===")
+for cube, ok in results.items():
+    print(f"  {cube:12s}: {'placed in tray' if ok else 'FAILED'}")
+print(f"  {sum(results.values())}/{len(results)} cubes placed")
 
 renderer.close()
 viewer.close()
