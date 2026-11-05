@@ -44,8 +44,8 @@ MAX_SPEED = 0.10          # conservative Cartesian speed for carrying a cube (m/
 PBVS_LOOKAHEAD_M = MAX_SPEED * 0.2
 PAN_SPEED = 0.4           # speed the base turns towards a tray (rad/s)
 CUBE_HALF = 0.02          # half a cube's size (m): the camera sees the front face, so we aim this far deeper
-RED_AMPLITUDE = 0.06      # the red cube slides this far left and right (m)
-RED_PERIOD = 6.0          # seconds for the red cube to slide there and back
+RED_AMPLITUDE = float(os.environ.get("RED_AMPLITUDE", "0.06"))   # the red cube slides this far left and right (m)
+RED_PERIOD = float(os.environ.get("RED_PERIOD", "6.0"))           # seconds for the red cube to slide there and back
 LEAD_TIME = 0.15          # aim this far ahead of the moving red cube (s)
 PRINT_EVERY = 6         # print the red cube every 6th camera picture (6 x 1/30 s = 0.2 s)
 
@@ -58,7 +58,9 @@ IK_POSITION_TOLERANCE = 0.010
 IK_ROTATION_TOLERANCE = 0.02
 TRAY_MEASUREMENT_TOLERANCE = 0.025
 GRIPPER_FORCE_MIN = 5.0     # N; simulated gripper force sensor threshold for "holding"
-LQR_POS_W = float(os.environ.get("LQR_POS_W", "20"))
+LQR_POS_W = float(os.environ.get("LQR_POS_W", "20"))       # line 60
+LQR_VEL_W = float(os.environ.get("LQR_VEL_W", "1.0"))
+LQR_IN_W = float(os.environ.get("LQR_IN_W", "0.1"))
 OBS_Q = float(os.environ.get("OBS_Q", "1e-5"))
 OBSERVER = os.environ.get("OBSERVER", "kf")                # "kf" = actuator-model Kalman, "cv" = constant velocity
 CV_ACCEL = float(os.environ.get("CV_ACCEL", "3.0"))        # rad/s^2, used only when OBSERVER=cv
@@ -66,7 +68,8 @@ if OBSERVER not in ("kf", "cv"):
     raise ValueError("OBSERVER must be 'kf' or 'cv'")
 DEPTH_NOISE_STD = float(os.environ.get("DEPTH_NOISE_STD", "0.0"))   # m, added to rendered depth (0 = noise-free)
 CAM_ACCEL = float(os.environ.get("CAM_ACCEL", "0.07"))              # m/s^2, camera Kalman process noise
-CAM_MEAS = float(os.environ.get("CAM_MEAS", "2.5e-5"))              # m^2, camera Kalman measurement variance
+CAM_MEAS = float(os.environ.get("CAM_MEAS", "2.5e-5"))    
+RUN_LABEL = os.environ.get("RUN_LABEL", "")                # m^2, camera Kalman measurement variance
 
 CUBES = ["Red Cube", "Yellow Cube", "Blue Cube"]
 CUBE_TO_TRAY = {"Red Cube": "Pink Tray", "Yellow Cube": "Green Tray", "Blue Cube": "Purple Tray"}
@@ -243,7 +246,12 @@ encoder_rng = np.random.default_rng(
 )
 control_model = PositionActuatorStateSpaceModel(model, data)
 control_model.print_report()
-controller = PositionActuatorLQRController(control_model, position_weight=LQR_POS_W)
+controller = PositionActuatorLQRController(
+    control_model,
+    position_weight=LQR_POS_W,
+    velocity_weight=LQR_VEL_W,
+    input_weight=LQR_IN_W,
+)
 if OBSERVER == "cv":
     observer = ConstantVelocityObserver(
         control_model,
@@ -266,6 +274,9 @@ joint_reference_samples = []
 joint_truth_samples = []
 joint_estimate_samples = []
 joint_sample_times = []
+torque_samples = []         # torque on the six arm joints at each step (N m)
+stage_samples = []          # task stage at each step, for the per-stage tracking table
+settled_joint_errors = []   # worst joint error each time a move is declared reached (rad)
 nis_samples = []
 residual_actuator = []      # actual next state minus actuator-model prediction
 residual_cv = []            # actual next state minus constant-velocity prediction
@@ -647,9 +658,11 @@ def step_sim():
     joint_truth_samples.append(data.qpos[:6].copy())
     joint_estimate_samples.append(q_est.copy())
     joint_sample_times.append(float(data.time))
+    stage_samples.append(task_stage)
     state_before_step = np.r_[data.qpos[:6], data.qvel[:6]].copy()
     control_before_step = position_command.copy()
     mujoco.mj_step(model, data)
+    torque_samples.append(data.actuator_force[:6].copy())
     actual_state = np.r_[data.qpos[:6], data.qvel[:6]]
     predicted_state = (
         control_model.A @ state_before_step
@@ -743,6 +756,7 @@ def goto(get_target, tol=0.01, carry_check=None):
     motion_target = None
     if success:
         pbvs_position_errors.append(tcp_error)
+        settled_joint_errors.append(float(np.max(np.abs(data.qpos[:6] - q_reference))))
         print(
             f"  PBVS reached target: desired={np.round(point, 3)} "
             f"TCP_est={np.round(tcp_position, 3)} error={tcp_error:.4f}m"
@@ -800,7 +814,8 @@ def pick_and_place(cube, tray):
         return finish(False)
 
     def handle_carry_failure(reason):
-        return abort(reason, carry_failure_detected)
+        tag = "carry sensor tripped" if carry_failure_detected else "motion failed"
+        return abort(f"{reason} [{tag}]", carry_failure_detected)
 
     def ensure_tray_localized():
         global target, R_des, task_stage
@@ -1132,6 +1147,10 @@ print("\nAll requested cubes sorted." if all_requested_completed else
       "\nSorting run incomplete; review the reported checks.")
 joint_tracking_rmse = float("nan")
 joint_estimation_rmse = float("nan")
+joint_tracking_max = float("nan")
+joint_tracking_rmse_away = float("nan")
+worst_tracking_joint = float("nan")
+worst_tracking_time = float("nan")
 if joint_truth_samples:
     truth_samples = np.asarray(joint_truth_samples)
     reference_samples = np.asarray(joint_reference_samples)
@@ -1145,6 +1164,7 @@ if joint_truth_samples:
         np.asarray(joint_estimate_samples),
     )
     joint_estimation_rmse = estimation["rmse_rad"]
+    joint_tracking_max = tracking["max_abs_error_rad"]
     print(
         "Joint tracking RMSE: "
         f"{tracking['rmse_rad']:.5f} rad "
@@ -1159,6 +1179,8 @@ if joint_truth_samples:
         np.argmax(np.abs(truth_samples - reference_samples)),
         truth_samples.shape,
     )
+    worst_tracking_joint = int(worst_joint) + 1
+    worst_tracking_time = float(joint_sample_times[worst_sample])
     print(
         "Largest joint tracking deviation: "
         f"joint {worst_joint + 1} at t={joint_sample_times[worst_sample]:.2f}s "
@@ -1177,6 +1199,17 @@ if joint_truth_samples:
             f"{away_tracking['rmse_rad']:.5f} rad "
             f"(max {away_tracking['max_abs_error_rad']:.5f} rad)"
         )
+        joint_tracking_rmse_away = away_tracking["rmse_rad"]
+    stage_array = np.asarray(stage_samples)
+    tracking_error = truth_samples - reference_samples
+    stage_rows = []
+    for stage_name in dict.fromkeys(stage_samples):
+        in_stage = stage_array == stage_name
+        stage_rows.append((float(np.sqrt(np.mean(tracking_error[in_stage] ** 2))),
+                           int(in_stage.sum()), stage_name))
+    print("Joint tracking RMSE by task stage (rad):")
+    for stage_rmse, stage_count, stage_name in sorted(stage_rows, reverse=True):
+        print(f"  {stage_rmse:.5f}  {stage_count:7d} steps  {stage_name}")
 if camera_position_errors:
     camera_rmse = np.sqrt(np.mean(np.square(camera_position_errors)))
     print(f"Estimated camera-position RMSE: {camera_rmse:.5f} m")
@@ -1272,6 +1305,35 @@ if np.any(actuator_saturation_counts):
         "LQR actuator saturation counts by joint: "
         f"{actuator_saturation_counts.tolist()}"
     )
+n_logged_steps = len(joint_sample_times)
+ctrl_clip_fraction = (
+    float(actuator_saturation_counts.sum()) / (6 * n_logged_steps)
+    if n_logged_steps else float("nan")
+)
+torque_rms_nm = peak_torque_fraction = torque_saturation_fraction = float("nan")
+if torque_samples:
+    torque_array = np.asarray(torque_samples)
+    torque_rms_nm = float(np.sqrt(np.mean(torque_array ** 2)))
+    torque_limited = model.actuator_forcelimited[:6].astype(bool)
+    if torque_limited.any():
+        torque_limit = np.max(np.abs(model.actuator_forcerange[:6]), axis=1)
+        torque_ratio = np.abs(torque_array[:, torque_limited]) / torque_limit[torque_limited]
+        peak_torque_fraction = float(torque_ratio.max())
+        torque_saturation_fraction = float(np.mean(torque_ratio >= 0.99))
+print(
+    "Control effort: "
+    f"torque RMS {torque_rms_nm:.2f} N m, "
+    f"peak torque {100 * peak_torque_fraction:.0f}% of limit, "
+    f"{100 * torque_saturation_fraction:.2f}% of joint-steps at the torque limit; "
+    f"position command clipped in {100 * ctrl_clip_fraction:.3f}% of joint-steps"
+)
+joint_settled_rmse = (
+    float(np.sqrt(np.mean(np.square(settled_joint_errors))))
+    if settled_joint_errors else float("nan")
+)
+print(f"Joint error when moves were declared reached: RMSE {joint_settled_rmse:.5f} rad "
+      "(worst joint per move)")
+
 if placement_results:
     print(
         f"Placement success rate: {sum(placement_results)}/{len(placement_results)} attempts "
@@ -1301,7 +1363,12 @@ print(f"Observer NIS mean: {observer_nis_mean:.2f} (expect about 6 for 6 measure
 all_depth_std = [s for values in depth_std_samples.values() for s in values]
 depth_std_mean_mm = 1000 * float(np.mean(all_depth_std)) if all_depth_std else float("nan")
 
-results_path = Path(__file__).resolve().with_name("trial_results.csv")
+results_path = (
+    Path(os.environ["RESULTS_CSV"]).resolve()
+    if os.environ.get("RESULTS_CSV")
+    else Path(__file__).resolve().with_name("trial_results.csv")
+)
+results_path.parent.mkdir(parents=True, exist_ok=True)
 result_columns = [
     "timestamp", "seed", "requested_order", "sequence_success",
     "requested_cubes", "completed_cubes", "attempts", "retries",
@@ -1312,6 +1379,11 @@ result_columns = [
     "observer_nis_mean", "lqr_position_weight", "observer_process_noise", 
     "observer_type", "cv_accel_noise",
     "depth_noise_std_m", "camera_accel_noise", "camera_meas_noise", "depth_std_mean_mm",
+    "run_label", "red_amplitude_m", "red_period_s",
+    "joint_tracking_max_rad", "joint_tracking_rmse_away_rad", "worst_tracking_joint",
+    "worst_tracking_time_s", "joint_settled_rmse_rad", "torque_rms_nm",
+    "peak_torque_fraction", "torque_saturation_fraction", "ctrl_clip_fraction",
+    "lqr_velocity_weight", "lqr_input_weight",
 ]
 write_header = not results_path.exists()
 with results_path.open("a", newline="", encoding="utf-8") as results_file:
@@ -1346,6 +1418,20 @@ with results_path.open("a", newline="", encoding="utf-8") as results_file:
         "camera_accel_noise": CAM_ACCEL,
         "camera_meas_noise": CAM_MEAS,
         "depth_std_mean_mm": depth_std_mean_mm,
+        "run_label": RUN_LABEL,                            # ADD
+        "red_amplitude_m": RED_AMPLITUDE,                  # ADD
+        "red_period_s": RED_PERIOD,
+        "joint_tracking_max_rad": joint_tracking_max,
+        "joint_tracking_rmse_away_rad": joint_tracking_rmse_away,
+        "worst_tracking_joint": worst_tracking_joint,
+        "worst_tracking_time_s": worst_tracking_time,
+        "joint_settled_rmse_rad": joint_settled_rmse,
+        "torque_rms_nm": torque_rms_nm,
+        "peak_torque_fraction": peak_torque_fraction,
+        "torque_saturation_fraction": torque_saturation_fraction,
+        "ctrl_clip_fraction": ctrl_clip_fraction,
+        "lqr_velocity_weight": LQR_VEL_W,
+        "lqr_input_weight": LQR_IN_W,   
     })
 print(f"Trial results appended to {results_path.name}")
 
