@@ -12,14 +12,23 @@ A simulated UR3e uses a wrist-mounted RGB-D camera to find red, blue and yellow 
 
 **Technical documentation:** [pipeline walkthrough](Maryam_Final_Integration/docs/pipeline_walkthrough.md) and [recorded validation report](Maryam_Final_Integration/docs/index.html).
 
-## Group information
+## Contributions
 
-| Member | Contribution (team to complete) |
-|---|---|
-| Tasnim Sarah | |
-| Maryam Qutub | |
-| Princess Kisakye | |
-| Vanessa Kurniawidi | |
+### Tasnim Sarah
+
+Tasnim created the repository and supported team communication and organisation. She helped integrate different parts of the simulation and developed project-page content, including theoretical explanations and graphs.
+
+### Maryam Qutub
+
+Maryam initially worked on RGB-D sensing, including wrist-camera colour detection and depth-based localisation of the cubes. She then connected camera measurements and Kalman estimates to position-based visual servoing (PBVS), inverse kinematics and LQR joint control using estimated feedback. She also worked on randomised sorting, live camera monitoring, performance measurements and debugging pickup and transfer failures.
+
+### Princess Kisakye
+
+Princess developed the codespace to support the project requirements and coordinated team roles and responsibilities. She worked on Kalman filtering and further integration, helped the simulation operate realistically and successfully, and supported the team's understanding of the system.
+
+### Vanessa Kurniawidi
+
+Vanessa created the simulation environment and contributed to the project page, including the system logic flowchart and theoretical analysis. She also helped debug the simulation to improve robustness and task execution.
 
 ## Install and run
 
@@ -106,6 +115,6 @@ Headless rendering still requires an OpenGL-capable environment. A smoke check o
 
 ## Generative AI declaration
 
-OpenAI Codex assisted with code review, implementation, testing infrastructure and documentation. Team members are responsible for reviewing the changes and understanding the submitted system.
+ChatGPT and Claude were used to assist with technical explanations, code development, debugging and documentation. Team members are responsible for reviewing AI-assisted material, checking it against the implementation and results, and understanding the submitted system.
 
 <!-- Team: complete the declaration with all other tools used, their purposes and any required subject-specific details. -->
