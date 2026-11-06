@@ -8,7 +8,7 @@ A simulated UR3e uses a wrist-mounted RGB-D camera to find red, blue and yellow 
 
 **Project website:** [link](PASTE_WEBSITE_LINK_HERE)
 
-**Demo video:** [link](PASTE_LINK_HERE)
+**Demo video:** [Watch the demonstration](https://youtu.be/spyB0FesHyg)
 
 **Technical documentation:** [pipeline walkthrough](Maryam_Final_Integration/docs/pipeline_walkthrough.md) and [recorded validation report](Maryam_Final_Integration/docs/index.html).
 
