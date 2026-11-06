@@ -1,0 +1,85 @@
+<mujoco model="ur3e_pick_scene">
+
+  <include file="ur3e.xml"/>
+
+  <statistic center="0.3 0 0.1" extent="1.0"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="150" elevation="-25"/>
+  </visual>
+
+    <default>
+    <!-- Bin -->
+    <default class="bin">
+      <geom type="box" friction="1 0.005 0.0001"/>
+    </default>
+  </default>
+
+
+ <asset>
+    <material name="table_neutral" rgba="0.32 0.32 0.32 1" specular="0" shininess="0"/>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
+             markrgb="0.8 0.8 0.8" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
+
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane" pos="0 0 -0.75"/>
+
+    <!-- Table -->
+    <geom name="table_top" type="box" pos="0.3 0 -0.375" size="0.4 0.6 0.375" material="table_neutral"/>
+
+    <!-- Objects -->
+     <body name="red_cube" pos="0.3 0.15 0.021">
+      <freejoint name="red_cube_joint"/>
+      <geom name="red_cube_geom" type="box" size="0.02 0.02 0.02" mass="0.05" rgba="0.9 0.1 0.1 1" friction="1.5 0.01 0.001"/>
+    </body>
+
+    <body name="yellow_cube" pos="0.35 0 0.021">
+      <freejoint name="yellow_cube_joint"/>
+      <geom name="yellow_cube_geom" type="box" size="0.02 0.02 0.02" mass="0.05" rgba="0.95 0.8 0.1 1" friction="1.5 0.01 0.001"/>
+    </body>
+
+    <body name="blue_cube" pos="0.35 -0.15 0.021">
+      <freejoint name="blue_cube_joint"/>
+      <geom name="blue_cube_geom" type="box" size="0.02 0.02 0.02" mass="0.05" rgba="0.1 0.3 0.9 1" friction="1.5 0.01 0.001"/>
+    </body>
+
+    <body name="red_bin" pos="0.08 0.31 0" childclass="bin">
+      <geom name="red_bin_floor" size="0.055 0.055 0.0025" pos="0 0 0.0025" rgba="0.45 0.45 0.45 1"/>
+      <geom name="red_bin_wall_px" size="0.0025 0.055 0.025" pos="0.0525 0 0.025" rgba="0.9 0.1 0.1 1"/>
+      <geom name="red_bin_wall_nx" size="0.0025 0.055 0.025" pos="-0.0525 0 0.025" rgba="0.9 0.1 0.1 1"/>
+      <geom name="red_bin_wall_py" size="0.055 0.0025 0.025" pos="0 0.0525 0.025" rgba="0.9 0.1 0.1 1"/>
+      <geom name="red_bin_wall_ny" size="0.055 0.0025 0.025" pos="0 -0.0525 0.025" rgba="0.9 0.1 0.1 1"/>
+      <site name="red_bin_drop" pos="0 0 0.10" size="0.006" rgba="1 1 1 0.3"/>
+    </body>
+
+
+    <body name="yellow_bin" pos="0.20 -0.31 0" childclass="bin">
+      <geom name="yellow_bin_floor" size="0.055 0.055 0.0025" pos="0 0 0.0025" rgba="0.45 0.45 0.45 1"/>
+      <geom name="yellow_bin_wall_px" size="0.0025 0.055 0.025" pos="0.0525 0 0.025" rgba="0.95 0.8 0.1 1"/>
+      <geom name="yellow_bin_wall_nx" size="0.0025 0.055 0.025" pos="-0.0525 0 0.025" rgba="0.95 0.8 0.1 1"/>
+      <geom name="yellow_bin_wall_py" size="0.055 0.0025 0.025" pos="0 0.0525 0.025" rgba="0.95 0.8 0.1 1"/>
+      <geom name="yellow_bin_wall_ny" size="0.055 0.0025 0.025" pos="0 -0.0525 0.025" rgba="0.95 0.8 0.1 1"/>
+      <site name="yellow_bin_drop" pos="0 0 0.10" size="0.006" rgba="1 1 1 0.3"/>
+    </body>
+
+    <body name="blue_bin" pos="0.22 0.32 0" childclass="bin">
+      <geom name="blue_bin_floor" size="0.055 0.055 0.0025" pos="0 0 0.0025" rgba="0.45 0.45 0.45 1"/>
+      <geom name="blue_bin_wall_px" size="0.0025 0.055 0.025" pos="0.0525 0 0.025" rgba="0.1 0.3 0.9 1"/>
+      <geom name="blue_bin_wall_nx" size="0.0025 0.055 0.025" pos="-0.0525 0 0.025" rgba="0.55 0.2 0.8 1" />
+      <geom name="blue_bin_wall_py" size="0.055 0.0025 0.025" pos="0 0.0525 0.025" rgba="0.1 0.3 0.9 1"/>
+      <geom name="blue_bin_wall_ny" size="0.055 0.0025 0.025" pos="0 -0.0525 0.025" rgba="0.1 0.3 0.9 1"/>
+      <site name="blue_bin_drop" pos="0 0 0.10" size="0.006" rgba="1 1 1 0.3"/>
+    </body>
+
+    <!-- Overview camera for testing and the demo video -->
+    <camera name="overview" pos="1.2 0 0.8" xyaxes="0 1 0 -0.5 0 0.85"/>
+  </worldbody>
+</mujoco>
+

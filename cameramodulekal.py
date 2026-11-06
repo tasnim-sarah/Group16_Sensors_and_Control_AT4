@@ -15,16 +15,27 @@ COLOUR_RANGES = {
     ],
 
     "Yellow Cube": [
-        ([18, 150, 45], [40, 255, 255]),
+        ([22, 180, 150], [38, 255, 255]),
     ],
 
     "Blue Cube": [
-        ([95, 140, 70], [130, 255, 255]),
+        ([100, 170, 90], [130, 255, 255]),
     ],
 
-}
-for _colour in ('Red','Yellow','Blue'):
-    COLOUR_RANGES[_colour+' Tray'] = COLOUR_RANGES[_colour+' Cube']
+    # New: tray colours
+    "Pink Tray": [
+        ([145, 60, 60], [179, 255, 255]),
+    ],
+
+    "Green Tray": [
+        ([35, 50, 40], [90, 255, 255]),
+    ],
+
+    # Black has low brightness.
+    # Shadows and other dark objects may also match.
+    "Purple Tray": [
+      ([128, 80, 50], [146, 255, 255]),
+    ]}
 
 
 # --------------------------------------------------
@@ -40,12 +51,7 @@ class LinearKalmanFilter3D:
         vx, vy, vz = velocity in metres/second
     """
 
-    def __init__(self, dt=1.0 / 30.0, accel_noise=0.07, meas_noise=2.5e-5):
-        # accel_noise: std of the object's random acceleration (m/s^2) -> process noise Q
-        # meas_noise : variance of one camera position measurement (m^2) -> R
-        self.meas_noise = float(meas_noise)
-        self.accel_noise = float(accel_noise)
-        self.dt = float(dt)
+    def __init__(self, dt=1.0 / 30.0):
         self.kf = cv2.KalmanFilter(6, 3)
 
         # Predict position using velocity.
@@ -67,16 +73,13 @@ class LinearKalmanFilter3D:
 
         # Camera measurement uncertainty.
         self.kf.measurementNoiseCov = (
-            np.eye(3, dtype=np.float32) * self.meas_noise
+            np.eye(3, dtype=np.float32) * 0.000025
         )
 
         # Motion prediction uncertainty.
-        # White-noise acceleration: position and velocity noise are tied together.
-        eye3 = np.eye(3)
-        gain = np.vstack([0.5 * dt**2 * eye3, dt * eye3])
         self.kf.processNoiseCov = (
-            float(accel_noise) ** 2 * (gain @ gain.T)
-        ).astype(np.float32)
+            np.eye(6, dtype=np.float32) * 0.001
+        )
 
         self.kf.errorCovPost = np.eye(
             6, dtype=np.float32
@@ -84,17 +87,9 @@ class LinearKalmanFilter3D:
 
         self.initialized = False
 
-    def update(self, position, dt=None):
+    def update(self, position):
         """Input measured [x, y, z]; return filtered position."""
 
-        interval = self.dt if dt is None else float(dt)
-        if not np.isfinite(interval) or interval <= 0:
-            raise ValueError("filter interval must be positive")
-        transition = np.eye(6, dtype=np.float32)
-        transition[:3, 3:] = np.eye(3) * interval
-        self.kf.transitionMatrix = transition
-        gain = np.vstack([0.5 * interval**2 * np.eye(3), interval * np.eye(3)])
-        self.kf.processNoiseCov = (self.accel_noise**2 * gain @ gain.T).astype(np.float32)
         position = np.asarray(
             position, dtype=np.float32
         ).reshape(3, 1)
@@ -106,9 +101,6 @@ class LinearKalmanFilter3D:
             )
 
             self.kf.statePost[:3] = position
-            self.kf.errorCovPost = np.diag(
-                [self.meas_noise] * 3 + [1.0] * 3
-            ).astype(np.float32)
             self.initialized = True
 
             return position.flatten().astype(float)
@@ -152,7 +144,7 @@ def aim_camera_once(
     target_world=(0.35, -0.05, 0.03),
     camera_name="wrist_cam"
 ):
-    """Calibrate the fixed wrist-camera orientation once during setup only."""
+    """Aim the camera at a target once during setup."""
 
     mujoco.mj_forward(model, data)
 
@@ -200,28 +192,6 @@ def aim_camera_once(
     return float(alignment)
 
 
-def camera_pose_from_joint_positions(
-    model,
-    data,
-    joint_positions,
-    camera_name="wrist_cam",
-):
-    """Compute the wrist camera pose by forward kinematics from estimated joints."""
-    q = np.asarray(joint_positions, dtype=float).reshape(6)
-    if not np.all(np.isfinite(q)):
-        raise ValueError("estimated joint positions must be finite")
-
-    data.qpos[:6] = q
-    data.qvel[:6] = 0.0
-    mujoco.mj_forward(model, data)
-
-    cam_id = model.camera(camera_name).id
-    return (
-        data.cam_xpos[cam_id].copy(),
-        data.cam_xmat[cam_id].reshape(3, 3).copy(),
-    )
-
-
 # --------------------------------------------------
 # 4. CAMERA SENSOR
 # --------------------------------------------------
@@ -233,20 +203,11 @@ class CameraSensor:
         model,
         renderer,
         camera_name="wrist_cam",
-        min_area=80,
-        max_depth_m=1.5,
-        depth_noise_std=0.0,
-        depth_noise_seed=None,
-        accel_noise=0.07,
-        meas_noise=2.5e-5,
-        workspace_bounds=None,
-        classify_geometry=False,
+        min_area=80
     ):
         self.model = model
         self.renderer = renderer
         self.camera_name = camera_name
-        self.workspace_bounds = None if workspace_bounds is None else np.asarray(workspace_bounds,dtype=float).reshape(3,2)
-        self.classify_geometry = bool(classify_geometry)
 
         self.cam_id = model.camera(camera_name).id
 
@@ -263,23 +224,11 @@ class CameraSensor:
         self.cy = (self.height - 1) / 2.0
 
         self.min_area = min_area
-        if max_depth_m <= 0:
-            raise ValueError("max_depth_m must be positive")
-        self.max_depth_m = float(max_depth_m)
         self.kernel = np.ones((3, 3), dtype=np.uint8)
-
-        # Simulated depth sensor noise (m). 0 = noise-free render.
-        self.depth_noise_std = float(depth_noise_std)
-        self._depth_rng = np.random.default_rng(depth_noise_seed)
-        if not np.isfinite(self.depth_noise_std) or self.depth_noise_std < 0:
-            raise ValueError("depth_noise_std must be finite and nonnegative")
-        self._last_detection_time = {}
 
         # Each cube and tray gets its own Kalman filter.
         self.position_filters = {
-            label: LinearKalmanFilter3D(
-                accel_noise=accel_noise, meas_noise=meas_noise
-            )
+            label: LinearKalmanFilter3D()
             for label in COLOUR_RANGES
         }
 
@@ -307,38 +256,25 @@ class CameraSensor:
         finally:
             self.renderer.disable_depth_rendering()
 
-        if self.depth_noise_std > 0:
-            noise = self._depth_rng.normal(0.0, self.depth_noise_std, depth.shape)
-            depth = depth + noise.astype(depth.dtype)
-
         return rgb, depth
 
     # --------------------------------------------------
     # Detect cubes and trays
     # --------------------------------------------------
 
-    def detect(
-        self,
-        data,
-        rgb=None,
-        depth=None,
-        camera_pose=None,
-        position_priors=None,
-        full_cube_labels=(),
-    ):
+    def detect(self, data, rgb=None, depth=None):
 
         if rgb is None or depth is None:
             rgb, depth = self.capture(data)
 
-        if camera_pose is None:
-            raise ValueError(
-                "camera_pose must be computed from estimated joint positions"
-            )
-
         hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
 
-        cam_pos = np.asarray(camera_pose[0], dtype=float).reshape(3)
-        R_wc = np.asarray(camera_pose[1], dtype=float).reshape(3, 3)
+        # Camera pose in world coordinates.
+        cam_pos = data.cam_xpos[self.cam_id].copy()
+
+        R_wc = data.cam_xmat[self.cam_id].reshape(
+            3, 3
+        ).copy()
 
         detections = {}
 
@@ -366,38 +302,23 @@ class CameraSensor:
                 mask, cv2.MORPH_CLOSE, self.kernel
             )
 
-            contours, hierarchy = cv2.findContours(
+            contours, _ = cv2.findContours(
                 mask,
-                cv2.RETR_TREE,
+                cv2.RETR_EXTERNAL,
                 cv2.CHAIN_APPROX_SIMPLE
             )
 
             candidates = []
 
-            for contour_index, contour in enumerate(contours):
-                # Even nesting levels are coloured regions: a cube inside the
-                # neutral tray floor is depth 2. Odd levels are holes, not objects.
-                parent = int(hierarchy[0,contour_index,3])
-                nesting = 0
-                while parent >= 0:
-                    nesting += 1
-                    parent = int(hierarchy[0,parent,3])
-                if nesting % 2:
-                    continue
+            for contour in contours:
 
                 area = cv2.contourArea(contour)
-                x, y, width, height = cv2.boundingRect(contour)
-                edge_margin = max(8, round(min(self.width, self.height) * 0.025))
-                if (
-                    x < edge_margin
-                    or y < edge_margin
-                    or x + width > self.width - edge_margin
-                    or y + height > self.height - edge_margin
-                ):
-                    continue
 
-                # Close-up cubes can fill a large fraction of the image during grasping.
-                max_area = self.width * self.height * 0.35
+                # Trays may cover more image area than cubes.
+                if label.endswith("Tray"):
+                    max_area = self.width * self.height * 0.35
+                else:
+                    max_area = self.width * self.height * 0.10
 
                 if not self.min_area <= area <= max_area:
                     continue
@@ -427,19 +348,11 @@ class CameraSensor:
                 if not interior.any():
                     interior = selected
 
-                # Use actual colour pixels, rather than filling a tray hole with
-                # unrelated floor depth. Thin tray rims retain their colour pixels.
-                if label.endswith('Tray'):
-                    interior = selected
-                interior = cv2.bitwise_and(interior, mask)
-
                 depths = depth[interior > 0]
 
                 # Ignore invalid depth values.
                 valid = depths[
-                    np.isfinite(depths)
-                    & (depths > 0.05)
-                    & (depths <= self.max_depth_m)
+                    np.isfinite(depths) & (depths > 0)
                 ]
 
                 if valid.size < 10:
@@ -457,36 +370,6 @@ class CameraSensor:
 
                 # Convert camera coordinates to world coordinates.
                 p_world = R_wc @ p_cam + cam_pos
-                # Reject background candidates BEFORE selecting the largest contour.
-                # Otherwise a floor tile can suppress a smaller valid blue cube.
-                if self.workspace_bounds is not None:
-                    if np.any(p_world < self.workspace_bounds[:,0]) or np.any(p_world > self.workspace_bounds[:,1]):
-                        continue
-
-                if self.classify_geometry:
-                    yy,xx = np.nonzero((selected>0)&(mask>0)&np.isfinite(depth)&(depth>.05)&(depth<=self.max_depth_m))
-                    if len(xx)<10:
-                        continue
-                    zz = depth[yy,xx]
-                    cloud_camera = np.column_stack(((xx-self.cx)*zz/self.fx,
-                        -(yy-self.cy)*zz/self.fy,-zz))
-                    cloud_world = cloud_camera @ R_wc.T + cam_pos
-                    low,high = np.percentile(cloud_world,[1,99],axis=0)
-                    extent = high[:2]-low[:2]
-                    if label.endswith('Cube'):
-                        # A finger can hide most of one cube face during the
-                        # verification lift. Keep compact partial faces, while
-                        # rejecting long thin rim segments.
-                        if (np.min(extent)<.004 or np.max(extent)>.075
-                            or np.max(extent)<.018
-                            or np.max(extent)/max(np.min(extent),1e-9)>5):
-                            continue
-                        if label in full_cube_labels and np.min(extent)<.028:
-                            continue
-                    else:
-                        if np.min(extent)<.075 or np.max(extent)>.17:
-                            continue
-                        p_world[:2] = (low[:2]+high[:2])*.5
 
                 candidates.append((area, {
                     "name": label,
@@ -495,28 +378,16 @@ class CameraSensor:
                     "position_world_m": p_world.copy(),
                     "area_px": float(area),
                     "valid_depth_pixels": int(valid.size),
-                    "depth_std_m": float(np.std(valid)),
                     "contour": contour,
-                    "classification": 'cube' if label.endswith('Cube') else 'tray',
                 }))
 
-            # Keep the strongest cube detection. For trays, a supplied static
-            # location prior associates separated coloured wall components with
-            # the correct tray; the returned position remains RGB-D measured.
+            # Keep the largest valid detection of each colour.
             if candidates:
-                if position_priors and label in position_priors:
-                    prior_xy = np.asarray(position_priors[label], dtype=float)[:2]
-                    detection = min(
-                        candidates,
-                        key=lambda item: np.linalg.norm(
-                            item[1]["position_world_m"][:2] - prior_xy
-                        ),
-                    )[1]
-                else:
-                    detection = max(
-                        candidates,
-                        key=lambda item: item[0]
-                    )[1]
+
+                detection = max(
+                    candidates,
+                    key=lambda item: item[0]
+                )[1]
 
                 # Save the original camera measurement.
                 raw_position = detection[
@@ -528,12 +399,9 @@ class CameraSensor:
                 )
 
                 # Smooth the position with its own Kalman filter.
-                previous_time = self._last_detection_time.get(label)
-                interval = None if previous_time is None else max(1e-6, float(data.time)-previous_time)
-                self._last_detection_time[label] = float(data.time)
                 filtered_position = (
                     self.position_filters[label].update(
-                        raw_position, dt=interval
+                        raw_position
                     )
                 )
 
@@ -544,3 +412,16 @@ class CameraSensor:
                 detections[label] = detection
 
         return detections
+
+
+# --------------------------------------------------
+# 5. SELECT A DETECTED OBJECT
+# --------------------------------------------------
+
+def selected_target(detections, name):
+    """
+    Examples:
+        selected_target(detections, "Red Cube")
+        selected_target(detections, "Pink Tray")
+    """
+    return detections.get(name)
