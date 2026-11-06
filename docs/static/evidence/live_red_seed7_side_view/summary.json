@@ -1,0 +1,75 @@
+{
+  "timestamp": "2026-11-06T15:20:04.554185+11:00",
+  "config": {
+    "colours": [
+      "red"
+    ],
+    "seed": 7,
+    "headless": true,
+    "output": "results/live_red_seed7_side_view",
+    "encoder_noise": 0.0005,
+    "depth_noise": 0,
+    "observer_q": 1e-05,
+    "lqr_position": 20,
+    "lqr_velocity": 1,
+    "lqr_input": 0.1,
+    "red_amplitude": 0.008,
+    "red_period": 16,
+    "smoke_seconds": 0,
+    "order": [
+      "Red Cube"
+    ]
+  },
+  "source_sha256": {
+    "robot_pipeline.py": "07968966d1d6b36f47ffd3c808c6145602849e4161c07567a595031f6755e353",
+    "robot_scene.py": "151b1f85b99cec4a933b2af1e95d5f2bd3a9385ad63da5bb11e37c651afb9ad9",
+    "controlfile.py": "4c71eefc0d0ec21aa89a65e9d6de75467e410bef45c1f7de61e76040d40be0a0",
+    "cameramodulekal.py": "a8e283472aec8ba45c270292d68804b8f96b0eba4c994a54abe1240e2ef686d1",
+    "visual_verification.py": "da1077997c5a969bf9923483b8f9042e081c79753f43958c3d5cae0448446f8f"
+  },
+  "run_type": "sorting",
+  "sequence_success": true,
+  "failure": null,
+  "completed": 1,
+  "pickup_confirmations": 1,
+  "placement_confirmations": 1,
+  "truth_placements": {
+    "Red Cube": true
+  },
+  "simulation_time_s": 54.020000000020055,
+  "wall_time_s": 108.9720080998959,
+  "events": [
+    {
+      "cube": "Red Cube",
+      "event": "first_finger_contact_evaluation",
+      "time_s": 26.163999999996378,
+      "pre_contact_velocity_m_s": [
+        0.0023415601673988525,
+        -0.002094682332804701,
+        -3.288626247707677e-16
+      ],
+      "pre_contact_horizontal_speed_m_s": 0.0031417508005749093,
+      "platform_motion_enabled": true
+    },
+    {
+      "cube": "Red Cube",
+      "event": "pickup",
+      "status": "confirmed",
+      "gripper_holding": true
+    },
+    {
+      "cube": "Red Cube",
+      "event": "placement",
+      "status": "confirmed"
+    }
+  ],
+  "controllability_rank": 12,
+  "observability_rank": 12,
+  "initial_closed_loop_spectral_radius": 0.9910911231407449,
+  "local_model_validation_max_error": 9.88127916298591e-07,
+  "joint_tracking_rmse_rad": 0.02195840433135512,
+  "joint_estimation_rmse_rad": 0.0004870948302380601,
+  "velocity_estimation_rmse_rad_s": 0.002946982487528818,
+  "saturation_fraction": 0.0,
+  "torque_squared_integral": 8004.964024107369
+}

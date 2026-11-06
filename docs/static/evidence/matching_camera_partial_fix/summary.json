@@ -1,0 +1,22 @@
+{
+  "bench": "static_simulation_known_grid",
+  "attempted": 45,
+  "detected": 40,
+  "source_sha256": {
+    "robot_pipeline.py": "c2b2a1bd9863b0c4c6ea54f5033582ec168dd372988959c3c51cd959c79a7623",
+    "robot_scene.py": "844e4225610d0bef1bd1cb631840dd683949cf1a848d79ce388d41ac7f98a587",
+    "controlfile.py": "4c71eefc0d0ec21aa89a65e9d6de75467e410bef45c1f7de61e76040d40be0a0",
+    "cameramodulekal.py": "f08b317611345c854cad480d08e3913b65073db3bebac067295f24b1f8dc3fad",
+    "visual_verification.py": "da1077997c5a969bf9923483b8f9042e081c79753f43958c3d5cae0448446f8f"
+  },
+  "detection_fraction": 0.8888888888888888,
+  "depth_noise_std_m": 0,
+  "encoder_noise_std_rad": 0.0005,
+  "rmse_3d_m": 0.0014885247748450089,
+  "bias_xyz_m": [
+    -0.0004986805808551931,
+    1.1705416079904911e-05,
+    -0.00032656210707296017
+  ],
+  "max_error_m": 0.00275715603334392
+}

@@ -1,0 +1,90 @@
+{
+  "timestamp": "2026-11-06T14:35:19.051670+11:00",
+  "config": {
+    "colours": [
+      "red",
+      "blue",
+      "yellow"
+    ],
+    "seed": 7,
+    "headless": true,
+    "output": "results/sequence_seed7_detection_fix",
+    "encoder_noise": 0.0005,
+    "depth_noise": 0,
+    "observer_q": 1e-05,
+    "lqr_position": 20,
+    "lqr_velocity": 1,
+    "lqr_input": 0.1,
+    "red_amplitude": 0,
+    "smoke_seconds": 0,
+    "order": [
+      "Red Cube",
+      "Blue Cube",
+      "Yellow Cube"
+    ]
+  },
+  "source_sha256": {
+    "robot_pipeline.py": "2d31bfae2e00de933690e472d82746a188d69f8f7f718e4066aa0c5033d5d0d8",
+    "robot_scene.py": "0c5fc3f652b70b23c706779c49981bcfbf74be60f480d6fef07a1f21d45d6859",
+    "controlfile.py": "4c71eefc0d0ec21aa89a65e9d6de75467e410bef45c1f7de61e76040d40be0a0",
+    "cameramodulekal.py": "1c7dcbf84e7bd804742cb0ac34004e5b19a0aa5b0a89ab465bb72faf0f0848c8",
+    "visual_verification.py": "da1077997c5a969bf9923483b8f9042e081c79753f43958c3d5cae0448446f8f"
+  },
+  "run_type": "sorting",
+  "sequence_success": true,
+  "failure": null,
+  "completed": 3,
+  "pickup_confirmations": 3,
+  "placement_confirmations": 3,
+  "truth_placements": {
+    "Red Cube": true,
+    "Blue Cube": true,
+    "Yellow Cube": true
+  },
+  "simulation_time_s": 195.66400000020616,
+  "wall_time_s": 295.6033536000177,
+  "events": [
+    {
+      "cube": "Red Cube",
+      "event": "pickup",
+      "status": "confirmed",
+      "gripper_holding": true
+    },
+    {
+      "cube": "Red Cube",
+      "event": "placement",
+      "status": "confirmed"
+    },
+    {
+      "cube": "Blue Cube",
+      "event": "pickup",
+      "status": "confirmed",
+      "gripper_holding": true
+    },
+    {
+      "cube": "Blue Cube",
+      "event": "placement",
+      "status": "confirmed"
+    },
+    {
+      "cube": "Yellow Cube",
+      "event": "pickup",
+      "status": "confirmed",
+      "gripper_holding": true
+    },
+    {
+      "cube": "Yellow Cube",
+      "event": "placement",
+      "status": "confirmed"
+    }
+  ],
+  "controllability_rank": 12,
+  "observability_rank": 12,
+  "initial_closed_loop_spectral_radius": 0.9910911231407449,
+  "local_model_validation_max_error": 9.894788270351645e-07,
+  "joint_tracking_rmse_rad": 0.02333122287837859,
+  "joint_estimation_rmse_rad": 0.00048755720363760744,
+  "velocity_estimation_rmse_rad_s": 0.0029185513540942133,
+  "saturation_fraction": 0.0,
+  "torque_squared_integral": 24169.879676517237
+}

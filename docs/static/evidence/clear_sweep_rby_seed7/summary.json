@@ -1,0 +1,126 @@
+{
+  "timestamp": "2026-11-06T15:49:09.432104+11:00",
+  "config": {
+    "colours": [
+      "r,b,y"
+    ],
+    "seed": 7,
+    "headless": true,
+    "debug": false,
+    "output": "results/clear_sweep_rby_seed7",
+    "encoder_noise": 0.0005,
+    "depth_noise": 0,
+    "observer_q": 1e-05,
+    "lqr_position": 20,
+    "lqr_velocity": 1,
+    "lqr_input": 0.1,
+    "red_amplitude": 0.02,
+    "red_period": 20,
+    "smoke_seconds": 0,
+    "order": [
+      "Red Cube",
+      "Blue Cube",
+      "Yellow Cube"
+    ]
+  },
+  "source_sha256": {
+    "robot_pipeline.py": "4a193c413e46822ff548a4b596e85469fb194699b5ef320db3d261b5d6f2274d",
+    "robot_scene.py": "8593819ab8c60a961bf3f3f3f884437afd0684317b3467352ef8c4b6603a2c0a",
+    "controlfile.py": "4c71eefc0d0ec21aa89a65e9d6de75467e410bef45c1f7de61e76040d40be0a0",
+    "cameramodulekal.py": "a8e283472aec8ba45c270292d68804b8f96b0eba4c994a54abe1240e2ef686d1",
+    "visual_verification.py": "da1077997c5a969bf9923483b8f9042e081c79753f43958c3d5cae0448446f8f"
+  },
+  "run_type": "sorting",
+  "sequence_success": true,
+  "failure": null,
+  "completed": 3,
+  "pickup_confirmations": 3,
+  "placement_confirmations": 3,
+  "truth_placements": {
+    "Red Cube": true,
+    "Blue Cube": true,
+    "Yellow Cube": true
+  },
+  "simulation_time_s": 195.9220000002074,
+  "wall_time_s": 228.89064899994992,
+  "events": [
+    {
+      "cube": "Red Cube",
+      "event": "first_finger_contact_evaluation",
+      "time_s": 26.421999999996235,
+      "pre_contact_velocity_m_s": [
+        -1.0495226645210244e-18,
+        -0.002674562093670386,
+        -1.1344339386562737e-15
+      ],
+      "pre_contact_horizontal_speed_m_s": 0.002674562093670386,
+      "platform_motion_enabled": true
+    },
+    {
+      "cube": "Red Cube",
+      "event": "pickup",
+      "status": "confirmed",
+      "gripper_holding": true
+    },
+    {
+      "cube": "Red Cube",
+      "event": "placement",
+      "status": "confirmed"
+    },
+    {
+      "cube": "Blue Cube",
+      "event": "first_finger_contact_evaluation",
+      "time_s": 83.5879999999866,
+      "pre_contact_velocity_m_s": [
+        3.5557772478729427e-16,
+        -1.7968698150347627e-15,
+        3.740993825104244e-16
+      ],
+      "pre_contact_horizontal_speed_m_s": 1.8317141290463342e-15,
+      "platform_motion_enabled": true
+    },
+    {
+      "cube": "Blue Cube",
+      "event": "pickup",
+      "status": "confirmed",
+      "gripper_holding": true
+    },
+    {
+      "cube": "Blue Cube",
+      "event": "placement",
+      "status": "confirmed"
+    },
+    {
+      "cube": "Yellow Cube",
+      "event": "first_finger_contact_evaluation",
+      "time_s": 154.13200000000785,
+      "pre_contact_velocity_m_s": [
+        -7.950633860348876e-16,
+        5.245836182476551e-18,
+        3.619030398290947e-16
+      ],
+      "pre_contact_horizontal_speed_m_s": 7.950806918863733e-16,
+      "platform_motion_enabled": true
+    },
+    {
+      "cube": "Yellow Cube",
+      "event": "pickup",
+      "status": "confirmed",
+      "gripper_holding": true
+    },
+    {
+      "cube": "Yellow Cube",
+      "event": "placement",
+      "status": "confirmed"
+    }
+  ],
+  "controllability_rank": 12,
+  "observability_rank": 12,
+  "initial_closed_loop_spectral_radius": 0.9910911231407449,
+  "local_model_validation_max_error": 9.927704672663823e-07,
+  "joint_tracking_rmse_rad": 0.02329002754571084,
+  "joint_estimation_rmse_rad": 0.00048752749023888526,
+  "velocity_estimation_rmse_rad_s": 0.002913221700691259,
+  "saturation_fraction": 0.0,
+  "torque_squared_integral": 24683.70745790956
+}

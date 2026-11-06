@@ -1,0 +1,12 @@
+{
+  "force_limit_fraction_any_joint": 0.00037772060925313406,
+  "force_limit_fraction_per_joint": [
+    8.166932091959655e-05,
+    0.00021438196741394095,
+    0.00021438196741394095,
+    0.0001633386418391931,
+    0.0,
+    0.00010208665114949569
+  ],
+  "note": "Force-limit occupancy, separate from actuator-target clipping in summary.json"
+}
