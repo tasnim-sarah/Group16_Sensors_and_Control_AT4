@@ -12,7 +12,7 @@ import numpy as np
 import mujoco
 import mujoco.viewer
 
-from Sensors_Control_Mech_Systems.Group16_Sensors_and_Control_AT4.cameramodulekal import CameraSensor, add_wrist_camera, aim_camera_once
+from cameramodulekal import CameraSensor, add_wrist_camera, aim_camera_once
 
 # --------------------------------------------------
 # SETTINGS (change these to play around)

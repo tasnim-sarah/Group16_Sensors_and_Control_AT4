@@ -1,13 +1,4 @@
 """Estimated-state LQR sorting. Truth access is confined to sensors/setup/evaluation."""
-import argparse
-import csv
-import hashlib
-import json
-import re
-import time
-from datetime import datetime
-from pathlib import Path
-
 import cv2
 import mujoco
 import mujoco.viewer
@@ -19,10 +10,130 @@ from controlfile import (PositionActuatorStateSpaceModel, JointKalmanObserver,
 from robot_scene import HOME, FINGER_TRAVEL, TRAYS, TRAY_BODY, TRAY_XY, build_scene, platform_target
 from visual_verification import PickupVerifier, placement_observation
 
-
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import argparse
+import csv
+import hashlib
+import json
+import re
+import time
+from datetime import datetime
+from pathlib import Path
 class TaskFailure(RuntimeError):
     pass
 
+def save_noise_results(robot, failure=None):
+ 
+    folder = Path("results/robustness")
+
+    folder.mkdir(parents=True, exist_ok=True)
+ 
+    # 1. Kalman filter position error
+
+    errors = []
+ 
+    for row in robot.tracking_samples:
+
+        estimated = np.array(row[6:9], dtype=float)
+
+        true = np.array(row[15:18], dtype=float)
+ 
+        errors.append(np.linalg.norm(estimated - true))
+ 
+    kalman_error = (
+
+        float(np.mean(errors)) if errors else np.nan
+
+    )
+ 
+    # 2. Completion percentage
+
+    completion = robot.completed / 3 * 100
+ 
+    # 3. Simulation time
+
+    duration = float(robot.data.time)
+ 
+    # 4. Save results to CSV
+
+    csv_file = folder / "noise_results.csv"
+ 
+    result = {
+
+        "seed": robot.args.seed,
+
+        "depth_noise": robot.args.depth_noise,
+
+        "encoder_noise": robot.args.encoder_noise,
+
+        "kalman_error_m": kalman_error,
+
+        "completion_percent": completion,
+
+        "time_s": duration,
+
+        "failure": str(failure) if failure else ""
+
+    }
+ 
+    exists = csv_file.exists()
+ 
+    with csv_file.open("a", newline="") as f:
+
+        writer = csv.DictWriter(f, fieldnames=result.keys())
+ 
+        if not exists:
+
+            writer.writeheader()
+ 
+        writer.writerow(result)
+ 
+    # 5. Read all saved runs
+
+    with csv_file.open("r", newline="") as f:
+
+        runs = list(csv.DictReader(f))
+ 
+    # 6. Update graph
+
+    noise = [float(r["depth_noise"]) * 1000 for r in runs]
+
+    error = [float(r["kalman_error_m"]) * 1000 for r in runs]
+ 
+    plt.figure(figsize=(8, 5))
+
+    plt.scatter(noise, error)
+ 
+    plt.xlabel("Depth camera noise (mm)")
+
+    plt.ylabel("Average Kalman error (mm)")
+
+    plt.title("Camera Noise vs Kalman Filter Error")
+
+    plt.grid(True)
+
+    plt.tight_layout()
+ 
+    plt.savefig(folder / "noise_graph.png")
+
+    plt.close()
+ 
+    # 7. Show results in terminal
+
+    print("\n===== RUN RESULTS =====")
+
+    print(f"Depth noise: {robot.args.depth_noise * 1000:.1f} mm")
+
+    print(f"Kalman error: {kalman_error * 1000:.2f} mm")
+
+    print(f"Completion: {completion:.1f}%")
+
+    print(f"Time: {duration:.2f} s")
+
+    print("CSV and graph saved!")
+ 
 
 class SortingRobot:
     def __init__(self, args):
@@ -603,6 +714,7 @@ def main(argv=None):
     finally:
         try:
             robot.save(failure, time.perf_counter()-start)
+            save_noise_results(robot, failure)
         finally:
             robot.close()
     return int(failure is not None)
