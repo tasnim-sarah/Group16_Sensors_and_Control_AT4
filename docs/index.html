@@ -298,6 +298,7 @@
   </section>
 
   <!-- MODELLING -->
+       <section id="modelling">
   <h2>Modelling</h2>
 <p class="criterion">State-space model, controllability and observability</p>
 
@@ -500,6 +501,7 @@ For our simulation, we used a plain kalman filter as the filter uses the old pos
   <div class="fig-ph">Figure: joint command vs actual joint angle</div>
 </div>
 <div class="todo">to fill in the results, log the tip position, the target and the joint angles during a run, then compute the RMSE and settling time. The existing <code>tracking_metrics</code> function in <code>controlfile.py</code> can calculate the joint RMSE and maximum error.</div>
+</section>
 
   <!-- ROBUSTNESS -->
   <section id="robustness">
@@ -566,11 +568,24 @@ For our simulation, we used a plain kalman filter as the filter uses the old pos
 
     <h3>hardware</h3>
     <p>
-gfvhdchjdb    </p>
+Future Hardware implementation would follow the same pipeline of detection, kalman filter, 
+servoing and pick sequence, however, there are several things that would behave differently 
+from the simulation such as the fact that real depth data is noiser and has gaps and edge errors 
+so the kalman filter would need to be refined from the measured data. Colour thresholds must be made
+ more adaptive as the simulation has fixed lighting compared to rea world conditions where shadows 
+ and reflections change. Can talk about how real cubes may require stronger grip force 
+ im sorry my break is ending, can add gif/photo of real UR3e if we have time
+   </p>
 
     <h3>Limitations</h3>
     <p>
-      talk abt limitations of the project 
+      The current system was only tested in simulation, where the model of the arm and objects is 
+      perfect and the camera pose and intristics are known. On a real UR3e, these would carry errors. 
+      Our results only show the pipeline works in simulation, but may not be accurate on hardware. 
+
+      Another limitation is that the objects are identified by colour threshholds under fixed conditions,
+      a real scene will have lighting changes that could make a cube be missed or mistaken for something else
+      Anything of similar colour in the background could also be mistaken for a cube.
   </section>
 
   <!-- RUN -->
@@ -595,7 +610,7 @@ python pick_place_estimated.py r b y</pre>
         <tr><td>Tasnim Sarah</td><td>Tasnim contributed to implementing different parts of the simulation together as well as writing the contents of the project page. 
 </td></tr>
         <tr><td>Maryam Qutub</td><td>blah</td></tr>
-        <tr><td>Princess Kisakye</td><td>blah</td></tr>
+        <tr><td>Princess Kisakye</td><td>Princess worked on the physical code by getting it to pick up objects, making the final video and contribution to the project page</td></tr>
         <tr><td>Vanessa Kurniawidi</td><td>Vanessa created the environment where the simulation runs in, and also created the project page as well as worked on its contents.
 </td></tr>
       </table>
@@ -607,8 +622,8 @@ python pick_place_estimated.py r b y</pre>
     <h2>Generative AI declaration</h2>
     <div class="table-scroll">
       <table>
-        <tr><th>Tool</th><th>Used for</th><th>How output was checked</th></tr>
-        <tr><td>Claude</td><td>troubleshooting</td><td>double checked with team members to verify</td></tr>
+        <tr><th>Tool</th><th>Used for</th></tr>
+        <tr><td>Claude</td><td>Claude was utilised for this project to troubleshoot by identifying errors and suggesting a fix, we reviewed the suggestions, understood the logic and manually updated the code.</td></td></tr>
       </table>
     </div>
   </section>
@@ -617,7 +632,7 @@ python pick_place_estimated.py r b y</pre>
 
 <footer class="wrap">
   UR3e model adapted from SouthColumn76/universal_robots_ur3e (BSD-3-Clause). Simulation: MuJoCo (Google DeepMind). Vision: OpenCV.<br>
-  Code adapted from the 41014 weekly tutorials where noted in the source. Page layout inspired by the Nerfies project page.
+  Code adapted from the 41014 weekly tutorials. Page layout inspired by the Nerfies project page.
 </footer>
 
 </body>
