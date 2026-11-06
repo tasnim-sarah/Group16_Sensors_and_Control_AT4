@@ -51,7 +51,7 @@ class LinearKalmanFilter3D:
         vx, vy, vz = velocity in metres/second
     """
 
-    def __init__(self, dt=1.0 / 30.0):
+    def __init__(self, dt=1.0 / 30.0, accel_noise=0.07, meas_noise=2.5e-5):
         self.kf = cv2.KalmanFilter(6, 3)
 
         # Predict position using velocity.
@@ -73,7 +73,7 @@ class LinearKalmanFilter3D:
 
         # Camera measurement uncertainty.
         self.kf.measurementNoiseCov = (
-            np.eye(3, dtype=np.float32) * 0.000025
+            np.eye(3, dtype=np.float32) * meas_noise
         )
 
         # Motion prediction uncertainty.
@@ -81,9 +81,9 @@ class LinearKalmanFilter3D:
             np.eye(6, dtype=np.float32) * 0.001
         )
 
-        self.kf.errorCovPost = np.eye(
-            6, dtype=np.float32
-        )
+        G = np.vstack([0.5 * dt**2 * np.eye(3), dt * np.eye(3)])
+        self.kf.processNoiseCov = (accel_noise**2 * (G @ G.T)).astype(np.float32)
+    
 
         self.initialized = False
 
@@ -114,6 +114,7 @@ class LinearKalmanFilter3D:
     def reset(self):
         """Reinitialise when starting a new tracking session."""
         self.initialized = False
+        self.kf.errorCovPost = np.eye(6, dtype=np.float32)   # ADD
 
 
 # --------------------------------------------------
@@ -227,6 +228,10 @@ class CameraSensor:
         camera_name="wrist_cam",
         min_area=80,
         max_depth_m=1.5,
+        depth_noise_std=0.0,                                 # ADD
+        depth_noise_seed=None,
+        accel_noise=0.07,
+        meas_noise=2.5e-5,
     ):
         self.model = model
         self.renderer = renderer
@@ -251,10 +256,16 @@ class CameraSensor:
             raise ValueError("max_depth_m must be positive")
         self.max_depth_m = float(max_depth_m)
         self.kernel = np.ones((3, 3), dtype=np.uint8)
+        if not np.isfinite(depth_noise_std) or depth_noise_std < 0:   # ADD
+            raise ValueError("depth_noise_std must be a finite non-negative value")
+        self.depth_noise_std = float(depth_noise_std)
+        self.depth_rng = np.random.default_rng(depth_noise_seed)
 
         # Each cube and tray gets its own Kalman filter.
         self.position_filters = {
-            label: LinearKalmanFilter3D()
+            label: LinearKalmanFilter3D(
+                accel_noise=accel_noise, meas_noise=meas_noise
+            )
             for label in COLOUR_RANGES
         }
 
@@ -278,6 +289,8 @@ class CameraSensor:
             )
 
             depth = self.renderer.render().copy()
+            if self.depth_noise_std > 0.0:                   # ADD
+                depth = depth + self.depth_rng.normal(0.0, self.depth_noise_std, depth.shape)
 
         finally:
             self.renderer.disable_depth_rendering()
@@ -420,6 +433,7 @@ class CameraSensor:
                     "position_world_m": p_world.copy(),
                     "area_px": float(area),
                     "valid_depth_pixels": int(valid.size),
+                    "depth_std_m": float(np.std(valid)),     # ADD
                     "contour": contour,
                 }))
 
