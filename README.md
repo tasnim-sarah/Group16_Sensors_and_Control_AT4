@@ -62,33 +62,7 @@ Dependencies are listed in the integration folder's `requirements.txt`: NumPy, M
 
 Press `q` in the camera window to stop. The red platform moves side to side by +/-20 mm with a 20-second cycle by default. It continues through closure and lift; the robot does not deliberately wait for a programmed pause or stop the cube to grasp it.
 
-## Results and discussion
 
-The recorded 4 cm sweep tests completed both requested orders below. All six pickups and placements were sensor-confirmed, and independent simulator scoring agreed. The red cube's horizontal speeds immediately before first finger contact were approximately 2.675 and 5.547 mm/s respectively, supporting moving-target pickup under these tested conditions.
-
-| Recorded sequence | Seed | Correct placements | Simulation time (s) | Joint tracking RMSE (rad) | Joint estimation RMSE (rad) |
-|---|---|---|---|---|---|
-| Red, blue, yellow | 7 | 3/3 | 195.922 | 0.02329 | 0.000488 |
-| Blue, yellow, red | 7 | 3/3 | 196.046 | 0.02329 | 0.000488 |
-
-Source summaries: [red-first run](Maryam_Final_Integration/docs/static/evidence/clear_sweep_rby_seed7/summary.json) and [blue-first run](Maryam_Final_Integration/docs/static/evidence/clear_sweep_byr_seed7/summary.json). These are two selected sequences using the same seed, not a general reliability estimate. Preserved summaries contain source hashes and original filenames from the recorded revision; they are not a claim that every subsequent edit has been retested.
-
-The corresponding [static camera bench](Maryam_Final_Integration/docs/static/evidence/clear_sweep_camera_validation/summary.json) detected 45/45 observations across nine locations, with approximately 2.42 mm 3D localisation RMSE and 3.58 mm maximum error. This measures static localisation, not moving-target grasp accuracy. Earlier revisions and their results are documented separately in the validation report.
-
-Returning HOME gives each cycle a consistent starting pose. Measuring the tray before pickup establishes a camera-based destination before carrying a block, since the wrist camera cannot view the whole workspace at once. Both steps are deliberate choices in the current implementation, but they add travel and completion time. Their benefit relative to shorter routes has not been established by a controlled comparison.
-
-Future improvements include retaining validated static-tray measurements, searching again when confidence falls, and planning shorter transfers between tasks. These changes should be compared using completion time, tracking error and successful placements. More trials across starting positions, sensor noise and target speeds are needed to establish broader robustness.
-
-### Additional team results (to complete)
-
-Leave untested conditions blank until measured. Include trial counts, seeds, configuration and failures; identify the code revision used.
-
-| Test | Attempts | Successful | Success rate |
-|---|---|---|---|
-| Static cubes | | | |
-| Moving red cube across additional seeds | | | |
-| Higher encoder noise | | | |
-| Added depth noise | | | |
 
 ## Sensor feedback and evaluation
 
