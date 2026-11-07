@@ -147,7 +147,7 @@
     <p class="criterion"> UR3E performing tasks with disturbed trial </p>
     <div class="video">
     <iframe
-  src="https://www.youtube.com/watch?v=spyB0FesHyg"
+  src="https://www.youtube.com/embed/spyB0FesHyg"
   title="Demo video"
   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
   referrerpolicy="strict-origin-when-cross-origin"
@@ -305,73 +305,103 @@
   <h2>Modelling</h2>
 <p class="criterion">State-space model, controllability and observability</p>
 
-<h3>State-space model</h3>
 <p>
-  A state-space model describes the robot with a state (the minimum information needed to predict what happens
-  next), the inputs we can apply, and the outputs our sensors report. For the UR3e we model each of the six joints
-  as a double integrator, so the state is the joint angles and joint velocities:
+  The UR3e robot has six joints, each with a joint position and velocity, giving the system 12 states in total.
+  These states describe the robot's current joint configuration and movement. The system receives six
+  joint-position actuator commands as inputs, measured in radians, which control the movement of the robot.
 </p>
-<div class="eq">x = [q₁ … q₆, q̇₁ … q̇₆]ᵀ &nbsp;(12 states) &nbsp;&nbsp;·&nbsp;&nbsp; u = [u₁ … u₆]ᵀ (virtual joint accelerations) &nbsp;&nbsp;·&nbsp;&nbsp; y = [q₁ … q₆]ᵀ (encoders)</div>
 <p>
-  The model is discretised with a sample time dt, which is set to 1/30 s to match the camera and estimator rate.
-  Each joint follows:
+  The robot's behaviour is represented using a linearised state-space model derived from the MuJoCo simulation:
 </p>
-<div class="eq">q[k+1] = q[k] + dt·q̇[k] + ½dt²·u[k] &nbsp;&nbsp;&nbsp; q̇[k+1] = q̇[k] + dt·u[k]</div>
-<p>In matrix form, x[k+1] = A x[k] + B u[k] and y[k] = C x[k], with I as the 6 × 6 identity matrix:</p>
-<div class="eq">A = [ I &nbsp; dt·I ; 0 &nbsp; I ] &nbsp;&nbsp;&nbsp; B = [ ½dt²·I ; dt·I ] &nbsp;&nbsp;&nbsp; C = [ I &nbsp; 0 ] &nbsp;&nbsp;&nbsp; D = 0</div>
+<div class="eq">State equation: &nbsp; x<sub>k+1</sub> = A x<sub>k</sub> + B u<sub>k</sub> + c</div>
+<div class="eq">Output equation: &nbsp; y<sub>k</sub> = C x<sub>k</sub> + D u<sub>k</sub></div>
 <p>
-  So A is 12 × 12, B is 12 × 6 and C is 6 × 12. For one joint, the state is its angle and its speed, the input is an
-  acceleration, and the output is the angle read by the encoder.
+  Here, x<sub>k</sub> represents the current joint positions and velocities, while x<sub>k+1</sub> represents the
+  next state. Matrix A describes how the current state affects the next state, and matrix B describes how the
+  actuator commands affect the robot's movement. The term c represents the model offset.
+</p>
+<p>
+  Matrix C describes how the states relate to the encoder measurements, while matrix D represents the direct
+  effect of the inputs on the measured outputs, which is zero in our model. The encoders measure joint positions,
+  while the Kalman observer estimates the joint velocities.
 </p>
 
-<h3>Assumptions</h3>
+<h3>Controllability and observability</h3>
+<p>
+  To evaluate the model, we tested its controllability and observability by calculating the ranks of their
+  respective matrices. Since the system contains 12 states, a rank of 12 indicates full controllability or
+  observability of the local linearised model.
+</p>
+<p>The simulation produced the following results:</p>
 <ul>
-  <li>Each joint is decoupled and acts like a double integrator. In reality the joints are coupled by the arm's inertia, and the Coriolis and gravity forces change with the pose.</li>
-  <li>The input is a virtual joint acceleration, not a motor command. The MuJoCo arm uses position actuators, so this model is used for analysis and for the observer, and its acceleration output is not sent straight to the actuators.</li>
-  <li>The joint angles are measured directly by the encoders and the velocities are not measured.</li>
-  <li>The model is linear and has no friction, damping or joint limits, so it is most accurate for slow, smooth motions.</li>
+  <li>State variables: six joint positions and six joint velocities (12 states).</li>
+  <li>Control inputs: six joint-position actuator targets (rad).</li>
+  <li>MuJoCo timestep: 0.002 s.</li>
+  <li>Controllability rank: 12/12.</li>
+  <li>Observability rank: 12/12.</li>
+  <li>Maximum one-step model residual: 1.0 × 10⁻⁶.</li>
+  <li>Closed-loop spectral radius: 0.9911.</li>
 </ul>
-<div class="todo">compare the model against the simulation, e.g. command a known joint trajectory, plot the model's predicted angle against the MuJoCo qpos, and report the error. Without this check the model is only an assumption.</div>
+<p>
+  The controllability rank of 12/12 indicates that the six actuator inputs can theoretically control all 12
+  states around the operating point. The observability rank of 12/12 indicates that all 12 states can be
+  estimated from the available measurements over time, even though joint velocities are not directly measured.
+</p>
+<p>
+  The maximum one-step residual of 1.0 × 10⁻⁶ shows that the linearised model closely matches the MuJoCo
+  simulation for the small changes tested. The closed-loop spectral radius of 0.9911, which is below one, also
+  supports local stability when the LQR controller is applied.
+</p>
+<p>
+  Overall, these results show that the UR3e's linearised state-space model is suitable for joint-state estimation
+  and LQR control around the tested operating point. However, these results do not guarantee the same performance
+  under every robot configuration or operating condition.
+</p>
 
-<h3>Controllability</h3>
-<p>
-  A system is controllable if the inputs can steer it to any state we want. If it is not, no controller can fix
-  that. We test it by checking the rank of the matrix built from A and B:
-</p>
-<div class="eq">rank [B, AB, A²B, …, A¹¹B] = 12 (full rank, n = 12)</div>
-<p>
-  The model is controllable, which makes sense because every joint has its own acceleration input that acts on both
-  its angle and its speed.
-</p>
-
-<h3>Observability</h3>
-<p>
-  A system is observable if every state can be worked out from what the sensors measure. Our encoders only measure
-  angle, but speed can be recovered because the angle changes over time. We test it with the matrix built from
-  A and C:
-</p>
-<div class="eq">rank [C; CA; CA²; …; CA¹¹] = 12 (full rank, n = 12)</div>
-<p>
-  The model is observable, so a Kalman observer can estimate all 12 states, including the six joint velocities, from
-  the six angle readings. This observer is described in the Estimation section.
-</p>
   </section>
 
   <!-- SENSING -->
   <section id="sensing">
     <h2>Sensing</h2>
     <p class="criterion">Calibration, noise handling and frame management</p>
-    <p>
-      For this project we used a RGB depth camera to detect both the coloured cubes and their respective bins. The camera acts as passive exteroceptive sensors, which takes in the colour information of the environment- the camera “looks” for an object that contains the most amount of pixels containing the colour it is looking for. Based on the shape of the object the camera sees, it estimates the location of the object’s centroid, and communicates to the UR3e to move towards that point.
-MuJoCo renders 640 x 480 RGB and depth images with a vertical field view of __, to work out a focal length of 500 px and image centre to ______. These then form the camera matrix K, which converts a pixel and its depth back into a 3D point. The camera's position on the arm is also fixed on the wrist so the camera moves with the gripper.
-The simulated lens has no distortion, so that part of a real calibration isn’t needed, though on hardware you’d measure it with a checkerboard.  (can mention in hardware implementation Based on the intrinsic camera information, such as the focal length, pixel size and the image centre, the system uses that information to determine extrinsic information, such as the depth to hover above the cube, where the surface of the cube is and where to then pick up and drop off the cube. 
-Before picking up a cube, the wrist camera will scan the arco markers to calibrate and get an understanding of the pose of the camera and how specific joint angles relate to the global reference frame, the camera will then look around for any cubes. After every instance of the UR3e picking up a cube and placing it into a bin, the UR3e will return to a specific location and repeat the initial process. 
+   
+<p>
+  The UR3e uses a wrist-mounted RGB-D camera to detect coloured cubes and their matching trays. The camera
+  captures 640 × 480 images with a vertical field of view of 51.28°. Using the pinhole camera model, the focal
+  length is calculated as approximately 500 pixels, with the image centre at (319.5, 239.5) pixels. The camera is
+  mounted on the wrist at an offset of (0.0325, 0.095, 0.05) m.
+</p>
+<p>
+  The camera converts RGB images into HSV colour space to identify objects by colour. Morphological opening and
+  closing remove unwanted pixels, while contour detection finds the centre of each object in the image. Invalid
+  depth readings are removed, and the median depth is used to reduce measurement errors. The pixel coordinates and
+  depth are then converted into 3D positions. The camera's rotation and position are used to convert these
+  measurements into world coordinates. Since the camera moves with the robot's wrist, this conversion is updated
+  as the robot moves, allowing the robot to locate objects correctly from different positions.
+</p>
+<p>
+  Figure 1 shows how camera depth noise affects cube-position estimation across ten experimental seeds. Between 0
+  and 10 mm of added noise, the average Kalman-filtered position error stays between approximately 13.5 and
+  14.2 mm, showing that moderate noise has little effect on average accuracy. At 15 mm, errors vary more widely
+  from 10.9 to 15.6 mm, showing less consistent performance. Figure 3 also shows temporary position errors
+  exceeding 40 mm, which could contribute to unsuccessful grasps.
+</p>
 
-    <h3>Noise handling</h3>
-    <div class="todo">The graph evaluates the effect of increasing depth-camera noise on the accuracy of the cube-position Kalman filter across multiple experimental seeds, providing insight into the estimator's robustness under measurement uncertainty.
-Between 0 and 10 mm of added depth noise, the average Euclidean position error remains relatively stable at approximately 13.5–14.2 mm. However, at 15 mm, the results become more dispersed, ranging from approximately 10.9 to 15.6 mm. This indicates that increasing measurement noise does not produce a proportional increase in estimation error, although variability becomes more apparent at the highest tested noise level.
-Importantly, the presence of approximately 14 mm estimation error even without additional depth noise suggests that other factors contribute to inaccuracies. Potential explanations include camera localisation bias, Kalman filter prediction lag and differences in object motion between trials. However, the graph alone cannot establish their individual contributions.
-Overall, the findings suggest that the Kalman filter maintains relatively stable average estimation accuracy across the lower noise levels, demonstrating some tolerance to measurement uncertainty. Nevertheless, the increased variability at 15 mm highlights potential limitations under noisier conditions. As the graph evaluates estimation error rather than sorting success, it cannot independently confirm the robustness of the complete robotic system.
+<p>
+  To deal with failed pickups, the robot returns to its home position, uses the camera to measure the cube's
+  position again, and retries the pickup. This prevents the robot from continuing to rely on an outdated position
+  estimate. In the reported simulation, this process allows all three cubes to be picked up and placed in their
+  correct trays, showing how repeated camera measurements help the robot recover from errors.
+</p>
+<p>
+  Overall, the camera provides the position measurements needed for autonomous sorting, while noise reduction and
+  repeated measurements improve reliability. However, the system could be improved by further camera calibration
+  and adjusting the Kalman filter to better track moving objects. Additionally the results show significant
+  position errors suggesting that more accurate tracking could reduce failed pickups. As well, taking another
+  camera measurement immediately before grasping could also improve pickup accuracy. Although the current
+  recovery system allows the robot to return home, locate the cube again and retry, reducing the need for these
+  repeated attempts would improve efficiency and reliability.
+</p>
 
 <figure>
   <img src="static/cameraNoiseVsKalman.png" alt="UR3e at the table with three coloured cubes and three bins">
@@ -385,74 +415,55 @@ Overall, the findings suggest that the Kalman filter maintains relatively stable
     <h2>Estimation</h2>
     <p class="criterion">Observer / Kalman filter design, tuning and reported performance</p>
 
-    <p>In a real world scenario, sensors cannot fully and accurately measure the current state, due to noise created from environmental conditions and inaccurate sensors. To simulate an imperfect system, we used a Qd value and Rn value of 1e-4 and 2e-7. These current noise values distrust the model by a factor of 500 compared to the sensor noise, where the sensors have an error of around 0.09° or 1.5 milli-radians.  
-The actual UR3e has a resolution of 12Sbits, making it so that the level of sensor noise there is in the UR encoder itself, and its understanding of the joint states, is off by 1.5 milli-radians, making the Rn 2e-7, in the simulated sensor. 
-For our simulation, we used a plain kalman filter as the filter uses the old position, travel time and the velocity to determine the new position, and the camera just gives basic x, y and z coordinates. The trade off of using a simple Kalman filter, is the motion of the robot and the cubes. 
+<p>
+  The cube is modelled as moving at constant velocity, x₊ = Fx, with position measured directly, z = Hx + v.
+  Both the model and the measurement are linear, so linearising would change nothing, and the standard KF is
+  exact for this model. Its limit is the model itself, not the filter type (C.5).
 </p>
-   
-    <h3>Joint Truth vs Kalman Filter Estimate
-</h3>
-    <p>
-      The graph compares the actual joint positions of the UR3e robot (solid lines) with the positions estimated by the Kalman filter (dashed lines) during simulation using seed 1. This helps evaluate how accurately the filter estimates the robot's joint movements when sensor measurements contain noise.
-The results show that the estimated joint positions closely follow the actual positions throughout the simulation. The solid and dashed lines almost completely overlap, indicating that the Kalman filter can accurately track changes in joint positions as the robot moves between targets.
-This is important because the robot uses estimated joint positions for forward kinematics and LQR feedback control. Accurate estimates allow the controller to calculate appropriate joint commands and reduce errors during movement.
-However, the close overlap does not mean that estimation errors are completely eliminated. Small differences between the estimated and actual positions may not be visible at this scale. Therefore, the joint estimation error graph is needed to evaluate these differences more clearly.
-Overall, the graph demonstrates accurate joint-position estimation for the tested seed, supporting the effectiveness of the Kalman observer. However, additional trials are needed to determine whether this accuracy is maintained under different noise conditions.
-
-    </p>
-   
-    <h3>Joint Estimation Error Over Time
-    </h3>
-
-    <p> The graph shows how accurately the Kalman observer estimates the UR3e robot's joint positions throughout the simulation. The horizontal axis represents simulation time, while the vertical axis shows the difference between the actual and estimated joint positions in radians.
-The results show that the estimation errors remain relatively small, with a recorded joint estimation RMSE of 0.000488 rad (0.488 mrad). This indicates that the Kalman observer can accurately estimate the robot's joint positions as it moves between targets. Although small fluctuations occur during movement, the overall estimation error remains low.
-This is important because the LQR controller uses estimated joint positions to calculate the commands needed to move the robot. Accurate estimates help the controller respond correctly to changes in joint positions.
-In comparison, the recorded joint tracking RMSE is 0.02329 rad (1.33°), which is much larger than the estimation error. This shows that the Kalman observer estimates joint positions more accurately than the robot follows its commanded joint trajectories.
-Overall, the graph supports the accuracy of the Kalman observer under the tested conditions. However, further testing under different noise levels is needed to confirm its reliability.
+<p>
+  The arm is nonlinear, but the observer uses a linear model x₊ = Ax + Bu + c, with A and B from finite
+  differences of one MuJoCo step and c chosen so the model reproduces the nominal step exactly. The measurement
+  is linear (y = q + v).
 </p>
-
-<h3>Cube Kalman Filter Error Over Time
-    </h3>
-
-    <p> The graph shows how accurately the Kalman filter estimates the cube's position throughout the simulation. It compares the estimated position with the actual cube position in the X, Y and Z directions. The horizontal axis represents simulation time, while the vertical axis shows the estimation error in metres.
-The results show that the estimation error is generally small during some periods but increases significantly at certain points, with errors exceeding approximately 70 mm (0.07 m). These sudden increases indicate that the Kalman filter sometimes struggles to accurately track the cube's position.
-One possible explanation is the moving red cube, which continuously changes direction. The Kalman filter uses a constant-velocity model, meaning it predicts future positions using the cube's previous position and velocity. When the cube accelerates or changes direction, the estimated position may temporarily differ from its actual position.
-This is important because the robot uses the estimated cube position to calculate its target for grasping. Large estimation errors could therefore affect pickup accuracy.
-Overall, the graph shows that the Kalman filter can estimate cube positions but experiences periods of reduced accuracy. This highlights the need for improved filter tuning and further testing under moving-target conditions.
-
+<p>
+  Real sensors do not measure the state exactly, because of sensor imperfections and environmental conditions.
+  To test the estimator under realistic conditions, Gaussian noise with σ = 0.5 mrad is added to the simulated
+  joint encoders. The filter’s covariances, Q and R, do not create this imperfection. They tell the filter how
+  much noise to expect.
 </p>
-
-<h3>Joint Observer – RMSE Over Time
-</h3>
-
-<p> The graph shows how accurately the Kalman observer estimates the UR3e robot's joint positions across ten experimental seeds. It uses Root Mean Square Error (RMSE) to measure the difference between the actual joint positions and the positions estimated by the Kalman observer.
-The horizontal axis represents simulation time, while the vertical axis shows the estimation RMSE in milliradians (mrad). A lower RMSE indicates that the estimated joint positions are closer to the actual positions.
-The results show that the joint estimation RMSE remains relatively stable at approximately 0.5 mrad (0.0005 rad) throughout most of the simulation. Although small fluctuations occur, the overall error remains low, indicating that the Kalman observer can accurately estimate joint positions during robot movement.
-The results across the ten seeds also suggest that the observer maintains similar estimation accuracy under the tested conditions. This is important because the LQR controller relies on estimated joint states to calculate corrective joint-position commands.
-Overall, the graph demonstrates that the joint Kalman observer provides accurate and relatively consistent position estimates across the recorded trials. However, this graph measures estimation accuracy rather than joint tracking performance, so it does not independently demonstrate the effectiveness of the LQR controller.
+<p>
+  We set R = σ² = 2.5 × 10⁻⁷ rad² to match the injected encoder noise. The value is based on a 12-bit encoder,
+  which the UR3e is taken to use. A 12-bit encoder has a step of 2π/4096 = 1.53 mrad (0.088°). Rounding to the
+  nearest step gives a standard deviation of 1.53/√12 = 0.44 mrad, so 0.5 mrad is a rounded value of this. We
+  set Q = 1 × 10⁻⁵ as an allowance for model error. The model is therefore allowed about 40 times the variance of
+  the sensor, so the filter leans heavily on the encoders. This is only a rough ratio, because Q covers angles
+  and velocities in different units.
 </p>
-
-<h3> Joint Observer – NEES and ANEES Over Time
-</h3>
-
-<p> The graph evaluates how reliable the joint Kalman observer's uncertainty estimates are across ten experimental seeds. Normalised Estimation Error Squared (NEES) compares the actual estimation error with the uncertainty predicted by the Kalman filter, while Average NEES (ANEES) combines the results across trials.
-The graph shows that the normalised ANEES remains relatively close to the ideal value of 1 for much of the simulation and generally stays within the plotted 95% consistency bounds. This indicates that the observer's predicted uncertainty is reasonably consistent with its actual estimation errors under the tested conditions.
-Some fluctuations occur between individual seeds, showing that estimation performance varies slightly between trials. However, these variations do not appear to cause sustained inconsistency in the average results.
-This finding supports the joint RMSE graph, which shows a relatively stable estimation error of approximately 0.5 mrad. Together, the graphs indicate that the observer produces both accurate joint-position estimates and reasonably reliable uncertainty estimates.
-Overall, the results support the effectiveness of the joint Kalman observer under the tested conditions. However, the graph does not establish that the observer will remain consistent under all possible noise levels or operating conditions.
+<p>
+  In Figure 3, the joint observer uncertainty matches are consistent with its real error. But the per-joint error
+  equals the injected noise (0.5 mrad), and the norm of six independent errors of that size is about 1.2 mrad. So
+  the estimate is about as noisy as the raw reading, and the filter barely smooths. That follows from the tuning,
+  since the filter trusts the encoders. Its value is a consistent covariance and a velocity estimate.
 </p>
-
-<h3> Cube Kalman Filter – NEES and ANEES Over Time
-</h3>
-
-<p> The graph evaluates how reliable the cube Kalman filter's uncertainty estimates are across ten experimental seeds. Normalised Estimation Error Squared (NEES) compares the actual position estimation error with the uncertainty predicted by the filter, while Average NEES (ANEES) combines the results across the trials.
-The results show that the normalised ANEES frequently rises above the ideal value of 1, with extreme NEES spikes reaching approximately 10¹³. This indicates that the Kalman filter sometimes predicts much greater accuracy than it actually achieves.
-These findings support the previous cube RMSE graph, which showed temporary estimation errors exceeding 40 mm in individual directions. Together, the graphs demonstrate that the cube filter experiences both large position errors and unreliable uncertainty estimates during certain periods.
-One possible explanation is the constant-velocity model used by the filter. Since the moving red cube accelerates and changes direction, its actual movement may differ from the filter's predictions. However, the graph alone cannot confirm the exact cause of the extreme spikes.
-Overall, the results identify a significant limitation in cube-position estimation. Further investigation of the Kalman filter's covariance calculations, noise parameters and motion model is needed to improve its accuracy and consistency.
+<p>
+  The band is the 95% χ² interval for the mean over N seeds, with n degrees of freedom per seed:
 </p>
-
-    <h3>Results</h3>
+<p>
+  When static, NEES below 1 means the filter reports more uncertainty than it has, because R assumes 5 mm and
+  the real error is 1 to 3 mm. While moving, NEES above 1 means it reports less uncertainty than its real error,
+  because the constant-velocity model doesn’t fit a carried cube. The plateau of about 15 mm repeats across
+  episodes and seeds, which looks more like a consistent offset than random error. We haven’t separated filter
+  lag, camera latency and partial occlusion by the gripper. A direct test is to compare the stored raw
+  measurement with the filtered one during the moving phases. If the raw error is also about 15 mm, the source
+  is sensing. If it is small, it is filter lag.
+</p>
+<p>
+  This estimation process could be improved by having the cube Kalman filter assume constant speed, which reduces
+  accuracy when cubes accelerate or change direction. Using a model that accounts for acceleration and adjusting
+  Q and R during movement could improve tracking. Better filter tuning could also reduce joint sensor noise.
+  Improving camera calibration and testing different noise levels, camera errors and blocked views would further
+  improve the system’s accuracy and reliability.
+</p>
     
 <figure>
   <img src="static/truth_vs_estimate.png" alt="UR3e at the table with three coloured cubes and three bins">
@@ -471,127 +482,251 @@ Overall, the results identify a significant limitation in cube-position estimati
     <h2>Control</h2>
 <p class="criterion">Controller design, tuning and tracking results</p>
 
-<h3>Controller design</h3>
+ <h3>Controller design</h3>
 <p>
-  The controller has two layers. The outer layer is a resolved-rate visual servo: the camera and Kalman filter
-  give a target position for the gripper tip, and the controller turns the gap between the tip and that target into
-  joint motion. The inner layer is the arm's own position actuators in MuJoCo, which drive each joint to the
-  angle we command.
+  The UR3e uses a Position-Based Visual Servoing (PBVS)-based approach with a Linear Quadratic Regulator (LQR)
+  controller. The RGB-D camera and Kalman filter estimate the cube's 3D position, while Jacobian-based inverse
+  kinematics calculates the joint angles needed to reach it. The LQR controller follows these angles using
+  estimated joint positions and velocities rather than simulator ground truth. It uses the LQR control equation
+  to calculate the difference between the estimated and desired joint states and correct the robot's movement.
 </p>
-<p>Each simulation step, the outer layer does the following:</p>
-<ul>
-  <li>Position: the desired tip velocity is proportional to the distance from the target, v = k<sub>p</sub>(p<sub>target</sub> − p<sub>tcp</sub>), and it is capped at 0.25 m/s.</li>
-  <li>Orientation: a rotation error term, with gain k<sub>r</sub>, keeps the gripper pointing straight down.</li>
-  <li>Jacobian inverse: the six-row tip velocity (position and rotation) is converted into joint velocities with a damped Jacobian inverse, which stays stable near singular poses.</li>
-  <li>Null-space posture: joint motions that do not move the gripper are used to gently pull the elbow and wrists back towards the home pose.</li>
-  <li>Command: the joint velocities are integrated into new joint targets q<sub>cmd</sub>, which are kept within 0.3 rad of the arm's actual angles so the target never runs far ahead of the arm.</li>
-</ul>
-<div class="eq">q̇ = J⁺ [ v ; k<sub>r</sub>e<sub>rot</sub> ] + (I − J⁺J) k<sub>n</sub>(q<sub>home</sub> − q) &nbsp;&nbsp;&nbsp; J⁺ = Jᵀ(JJᵀ + λ²I)⁻¹ &nbsp;&nbsp;&nbsp; q<sub>cmd</sub> ← q<sub>cmd</sub> + q̇·dt</div>
+<div class="eq">u = −K(x̂ − x<sub>ref</sub>)</div>
+
+<h3>Controller tuning</h3>
 <p>
-  The base joint is turned separately when the arm swings towards a tray, at a limited speed of 0.4 rad/s. The
-  gripper uses its own position actuator, with the command switched between open (0) and closed (0.034 m).
+  The LQR controller uses Q and R weighting matrices to balance accuracy and control effort. The position weight
+  of 20 prioritises accurate joint positioning, while the velocity weight of 1 discourages unnecessary movement.
+  The input weight of 0.1 penalises large actuator commands. These values help the robot follow its target
+  without using excessive control effort.
 </p>
 
-<h3>Task sequence</h3>
-<p>For each cube, the controller steps through a fixed sequence, moving on once the tip is within a tolerance of its goal:</p>
-<ul>
-  <li>Hover above the cube at 0.12 m, following the Kalman-filtered position (12 mm tolerance).</li>
-  <li>Wait 0.5 s so the camera can settle, then record the cube position and descend to the grasp height of 0.03 m (8 mm tolerance).</li>
-  <li>Close the gripper, wait 0.8 s, and lift back to 0.12 m.</li>
-  <li>Check the grasp: if the fingers stopped before fully closing, they must be holding a cube. Otherwise it is reported as missed.</li>
-  <li>Turn the base towards the matching tray, wait for the camera to find it, move over it and open the gripper.</li>
-  <li>Lift, turn back and return to the home position, then reset the cube filters for the next pick.</li>
-</ul>
+<h3>Tracking results and evaluation</h3>
 <p>
-  The red cube slides back and forth, so the hover target is placed 0.15 s ahead of it using the
-  Kalman-filtered velocity. Once the gripper is above it, the cube is held still so it can be grasped.
+  Figure 4 shows joint tracking errors of approximately 40 to 70 mrad, with occasional peaks near 85 mrad. The
+  control-effort norm remained around 3.3–4.5, with no actuator saturation, showing that commands stayed within
+  their limits. Figure 2 and 3 also show a joint-observer RMSE of approximately 0.5 mrad, supporting the accuracy
+  of the estimated joint states.
+</p>
+<p>
+  The closed-loop stability equation gives a spectral radius of 0.9911, which is below 1 and indicates that the
+  linearised control system is locally stable. However, the higher tracking errors suggest that smoother
+  movements and further LQR tuning could improve accuracy.
+</p>
+<p>
+  Overall, the PBVS-based guidance and LQR controller allow the UR3e to reach camera-detected cubes using
+  estimated states while keeping actuator commands within their limits. The system could thus be improved by
+  further tuning for reliable cube picking which would limit the occasional tracking error peaks that occur
+  throughout the data.
 </p>
 
-<h3>LQR design</h3>
-<p>
-  We also designed an LQR controller on the double-integrator model from the Modelling section, which minimises
-  a cost on joint error and effort and gives the feedback law:
-</p>
-<div class="eq">u = −K(x̂ − x<sub>ref</sub>) &nbsp;&nbsp;&nbsp; Q = diag(20·I₆, 2·I₆) &nbsp;&nbsp;&nbsp; R = 0.5·I₆</div>
-<p>
-  K is calculated by solving the discrete Riccati equation at dt = 1/30 s. A larger Q gives tighter, faster
-  tracking with larger commands, and a larger R gives smoother, gentler motion with more lag. For each joint, the
-  gains are about 5.9 on the angle error and 3.9 on the velocity. The output of this controller is a virtual
-  acceleration, not a motor command. The MuJoCo arm uses position actuators, so the LQR is not connected to the
-  simulation and is presented as a design and analysis step.
-</p>
-
-<h3>Tuning</h3>
-<ul>
-  <li>Tip and rotation gains: k<sub>p</sub> = 5 s⁻¹ and k<sub>r</sub> = 5 s⁻¹, so position and orientation errors shrink together.</li>
-  <li>Speed cap: the tip speed is limited to 0.25 m/s to stop overshoot and keep a held cube from swinging.</li>
-  <li>Damping: λ² = 10⁻⁴ is small enough not to slow normal motion, but keeps the arm stable near singular poses.</li>
-  <li>Command clip: targets stay within 0.3 rad of the actual joint angles.</li>
-  <li>Lead time: 0.15 s of look-ahead for the moving red cube, chosen by [ ].</li>
-</ul>
-
-<h3>Limitations</h3>
-<p>
-  The cube and tray positions come from the camera and Kalman filter, but the servo currently reads the gripper
-  position, the Jacobian and the joint angles directly from MuJoCo rather than from the joint observer. This is a
-  limitation of the current setup, and connecting the observer's estimates to the controller is a natural next step.
-</p>
-
-<h3>Tracking results</h3>
-<p>Over [N] picks:</p>
-<ul>
-  <li>the gripper tip tracked its path with an RMSE of [ ] mm and a maximum error of [ ] mm</li>
-  <li>it settled within the 8 mm grasp tolerance in [ ] s</li>
-  <li>it finished with a grasp error of [ ] mm from the cube's true centre (ground truth used for evaluation only)</li>
-  <li>[ ] of [ ] picks were detected as holding the cube</li>
-</ul>
-<div class="grid2">
-  <div class="fig-ph">Figure: tip tracking error vs time during a pick</div>
-  <div class="fig-ph">Figure: joint command vs actual joint angle</div>
-</div>
-<div class="todo">to fill in the results, log the tip position, the target and the joint angles during a run, then compute the RMSE and settling time. The existing <code>tracking_metrics</code> function in <code>controlfile.py</code> can calculate the joint RMSE and maximum error.</div>
 </section>
-
   <!-- ROBUSTNESS -->
   <section id="robustness">
     <h2>Integration and robustness</h2>
     <p class="criterion">Performance under disturbance and noise</p>
 
-
-    <h3>System Integration</h3>
-    <p> The developed system integrates RGB-D sensing, object detection, Kalman state estimation, feedback control, the UR3e robotic manipulator and gripper into a complete autonomous pick-and-place system. Effective communication between these components is essential, as the robot must continuously update its movements using sensor information rather than relying solely on predetermined trajectories.
-The wrist-mounted RGB-D camera detects coloured cubes and their corresponding trays through HSV colour segmentation. Image coordinates and depth measurements are converted into three-dimensional positions and transformed into world coordinates using camera poses derived from estimated joint configurations. Kalman filters estimate the robot's joint states and the cubes' positions and velocities, combining model predictions with noisy measurements.
-These estimates are passed to the position-based visual servoing controller, which generates desired end-effector movements. Damped least-squares inverse kinematics converts these movements into joint references, while the discrete LQR controller calculates corrective joint-position actuator commands using estimated joint states.
-A significant integration challenge is the moving red cube, which travels continuously along a periodic path until grasped. The robot must therefore update its target during approach, descent and gripper closure rather than relying on its initial position. Pickup and placement are subsequently assessed using gripper feedback, measured cube motion and repeated camera observations.
-This integration establishes a closed-loop process connecting perception, estimation, control and task verification.
+<h3>System integration</h3>
+<p>
+  The UR3e integrates the RGB-D camera, Kalman filters, inverse kinematics, LQR controller and gripper to detect,
+  pick and sort coloured cubes. The camera measures each cube's position, the Kalman filters estimate the cube
+  and joint states, and inverse kinematics calculates the required joint angles. The LQR controller then guides
+  the robot using these estimates. The moving red cube tests this integration because the robot must continuously
+  update its target as the cube changes position. Camera measurements and gripper feedback are also used to
+  verify successful pickup.
 </p>
 
-    </div>
-    <div class="fig-ph">image of success rate vs noise level</div>
+<h3>Robustness and results</h3>
+<p>
+  Robustness was evaluated across 10 experimental seeds, using different sensor-noise conditions and a moving
+  cube. Figure 1 shows that average cube position error remained between 13.5 and 14.2 mm under 0–10 mm of added
+  depth noise. At 15 mm noise, errors varied between 10.9 and 15.6 mm, showing reduced consistency. Figure 5 shows
+  temporary cube estimation errors exceeding 40 mm, while joint estimation remained more accurate at
+  approximately 0.5 mrad RMSE. Figure 4 shows joint tracking errors generally around 40–70 mrad, with no actuator
+  saturation. These results demonstrate that joint control remains consistent, but cube localisation is less
+  reliable during certain movements, potentially affecting grasp accuracy.
+</p>
 
-    <h3>Discussion of findings and robustness</h3>
-    <div class="todo"> The experimental findings demonstrate that the integrated system can successfully complete autonomous sorting under the recorded conditions. Varying initial cube positions and introducing continuous motion of the red cube test the system's ability to respond to changing targets. Additional depth-noise and encoder-noise experiments evaluate the sensitivity of state estimation to imperfect measurements.
-Although the joint observer demonstrated comparatively accurate and consistent estimation, the cube Kalman filter exhibited larger transient errors and significant uncertainty inconsistency. One contributing limitation may be its constant-velocity motion model, which does not explicitly represent the acceleration and direction reversals of the periodically moving red cube. Consequently, predictions may lag behind actual object motion, particularly when the cube changes direction. This suggests that a more representative motion model or improved covariance tuning could enhance dynamic tracking.
-Camera-based localisation introduces further limitations. The HSV detector relies on predefined colour thresholds, making its performance potentially sensitive to lighting variations, shadows and similarly coloured objects. Furthermore, the localisation method incorporates assumptions about known cube dimensions and geometry. Although these assumptions are appropriate for the current simulation, they restrict the system's ability to generalise to objects with different shapes or sizes.
-The simulation environment also simplifies real-world sensing and manipulation. While configurable depth noise is introduced during testing, the camera model does not fully reproduce physical effects such as lens distortion, motion blur and depth discontinuities. Similarly, simulated gripper feedback and camera-based verification provide evidence of pickup, but cannot establish the reliability of physical grasps involving friction variation or object slippage.
-Another limitation is the absence of general obstacle-aware collision avoidance. The robot uses planned approach and clearance movements, which are suitable for the defined workspace but may not prevent collisions when unexpected obstacles are introduced.
-Importantly, the red cube follows a predictable periodic trajectory. Therefore, successful tracking demonstrates the system's ability to respond to this particular moving target, rather than proving robustness to arbitrary or unpredictable object motion.
-Collectively, these findings demonstrate successful integration while identifying limitations in dynamic estimation, perception generalisation and environmental adaptability. The recorded results support operation under the tested conditions, but further trials are required to establish reliability across a wider range of disturbances.
-</div>
+<h3>Limitations and improvements</h3>
+<p>
+  The cube Kalman filter assumes constant velocity, which may explain some tracking errors when the red cube
+  changes direction. The camera also relies on fixed colour thresholds and known cube dimensions, limiting its
+  ability to detect different objects or operate under changing lighting. Furthermore, the simulation does not
+  fully represent real-world camera errors, object slipping or unexpected obstacles. Improvements could include a
+  better motion model, more reliable object detection and tactile sensors to confirm successful grasps.
+</p>
+<p>
+  Overall, the results demonstrate successful integration of sensing, estimation and control under the tested
+  conditions. However, reducing cube-position estimation errors and testing more unpredictable object movements
+  would improve the system's reliability.
+</p>
+  
   </section>
   
   <!-- EXTENSION (possible HD????)-->
   <section id="extension">
-    <h2>Future hardware implementation and conclusion</h2>
+    <h2>Discussion and Results</h2>
 
-    <h3></h3>
-    <p>
-      The project successfully integrates RGB-D perception, Kalman state estimation, inverse kinematics and LQR feedback control into an autonomous vision-guided robotic sorting system. The recorded trials demonstrate that the UR3e can coordinate these components to identify, approach, grasp and sort stationary and moving cubes using sensor feedback.
-However, the robustness analysis reveals that successful task completion does not necessarily indicate consistently accurate object estimation. Transient tracking errors and uncertainty inconsistency highlight the importance of refining the Kalman filter's motion model and covariance parameters.
-Future improvements should prioritise more representative dynamic tracking models, improved object detection and broader experimental testing across varying noise levels, object velocities and initial configurations. For physical implementation, hand-eye camera calibration, measured sensor-noise characteristics, controller retuning and additional tactile sensing would help address the differences between simulation and hardware.
-Overall, the system provides a functional foundation for autonomous manipulation, while the identified limitations establish clear directions for improving reliability, adaptability and robustness.
+    <section id="results">
+  <h2>Results and discussion</h2>
+  <p class="criterion">Estimation accuracy, controller performance and robustness across ten seeds</p>
 
-   </p>
+  <h3>Figure 2</h3>
+  <figure>
+    <img src="static/anees_over_time.png" alt="Kalman cube position error against added depth noise across ten seeds">
+    <figcaption>Figure 1: Cube Kalman filter position error against added camera depth noise (ten seeds).</figcaption>
+  </figure>
+  <p>
+    The graph evaluates how increasing depth-camera noise affects the cube Kalman filter's position accuracy
+    across ten experimental seeds. This supports the project's aim of developing a vision-guided UR3e robot that
+    can reliably locate and grasp cubes despite measurement uncertainty.
+  </p>
+  <p>
+    Between 0 and 10 mm of added depth noise, the average Kalman position error remains relatively stable at
+    approximately 13.5–14.2 mm, showing limited sensitivity to increasing noise within this range. However, at
+    15 mm, the results become more scattered, ranging from approximately 10.9 to 15.6 mm. This indicates that the
+    filter's performance becomes less consistent at the highest tested noise level.
+  </p>
+  <p>
+    Importantly, the error remains around 14 mm even with zero added depth noise, suggesting that other factors
+    contribute to the estimation error. Possible causes include camera localisation errors, filtering delays and
+    limitations of the constant-velocity model used to track the moving red cube. However, the graph alone cannot
+    identify their individual effects.
+  </p>
+  <p>
+    Overall, the results suggest that the Kalman filter maintains relatively stable average position accuracy
+    under moderate depth noise, demonstrating some tolerance to measurement uncertainty. However, the greater
+    variation at 15 mm highlights a limitation in robustness. Further testing is needed to determine how these
+    estimation errors affect actual grasping and sorting success.
+  </p>
+
+  <h3>Figure 4</h3>
+  <figure>
+    <img src="static/lqr_over_time.png" alt="Normalised NEES for the joint observer and cube Kalman filter across ten seeds">
+    <figcaption>Figure 2: Normalised NEES of the joint observer and cube Kalman filter (ten seeds).</figcaption>
+  </figure>
+  <p>
+    The graphs evaluate the reliability of the joint and cube Kalman filters across ten experimental seeds over
+    approximately 200 seconds. The joint observer performs consistently, with its average normalised NEES
+    remaining close to the ideal value of 1 and generally within the 95% confidence bounds. Combined with a joint
+    estimation RMSE of approximately 0.5 mrad, this demonstrates that the observer provides accurate
+    joint-position estimates with reasonably reliable uncertainty predictions. This is important because the
+    UR3e's LQR controller relies on estimated joint states to calculate its control commands.
+  </p>
+  <p>
+    In contrast, the cube Kalman filter shows significantly greater inconsistency. Its normalised NEES frequently
+    rises to approximately 10 to 100, with extreme spikes approaching 10¹³ around 100, 135 to 145 and 170 to 180
+    seconds. These results indicate that the filter sometimes greatly underestimates its position uncertainty,
+    consistent with the cube RMSE peaks exceeding 40 mm. A possible contributing factor is the constant-velocity
+    model, which cannot fully represent the moving red cube's acceleration and changes in direction. However, the
+    extreme spikes also warrant investigation of the covariance calculations. Overall, the results show that joint
+    estimation is accurate and reasonably consistent, while cube tracking requires further improvement to
+    strengthen the reliability of the complete pick-and-place system.
+  </p>
+
+  <h3>Figure 3</h3>
+  <figure>
+    <img src="static/rmse_over_time.png" alt="Joint observer RMSE and cube position error over time across ten seeds">
+    <figcaption>Figure 3: Joint observer RMSE and cube Kalman filter position error over time (ten seeds).</figcaption>
+  </figure>
+  <p>
+    The graphs evaluate the accuracy of the UR3e's joint observer and cube Kalman filter across ten experimental
+    seeds, supporting the project's aim of using estimated states for reliable vision-guided pick-and-place
+    operations.
+  </p>
+  <p>
+    The joint observer graph shows a consistently low estimation RMSE, with the average remaining around 0.5 mrad
+    (0.0005 rad) throughout the 195-second simulation. Individual trials generally fluctuate between 0.3 and
+    0.7 mrad, without a sustained increase in error. This demonstrates that the observer can accurately estimate
+    joint positions during robot movement, providing reliable state information for forward kinematics and LQR
+    feedback control.
+  </p>
+  <p>
+    In contrast, the cube Kalman filter graph shows greater variation in position accuracy. Errors remain around
+    1 to 2 mm per axis during quieter periods but increase to approximately 15 mm around 65–75 and 135–145
+    seconds. Larger peaks occur around 35 to 40 seconds, exceeding 40 mm in individual trials, and around
+    175 seconds, reaching approximately 33 mm. These fluctuations indicate that cube-position estimation becomes
+    less accurate during certain stages of the sorting process.
+  </p>
+  <p>
+    One possible contributing factor is the constant-velocity Kalman model, which cannot fully represent the
+    moving red cube's acceleration and direction changes. However, the graph alone cannot identify the cause of
+    each peak.
+  </p>
+  <p>
+    Overall, the results show that joint-state estimation is accurate and consistent, while cube position
+    estimation experiences significant temporary errors. This highlights the importance of improving dynamic
+    object tracking to strengthen grasping accuracy and the robustness of the complete robotic system.
+  </p>
+
+  <h3>Figure 5</h3>
+  <figure>
+    <img src="static/truth_vs_estimate.png" alt="LQR tracking error, control effort, stage cost and actuator saturation across ten seeds">
+    <figcaption>Figure 4: LQR tracking error, control effort, stage cost and actuator saturation (ten seeds).</figcaption>
+  </figure>
+  <p>
+    The four graphs evaluate the UR3e's LQR controller across ten experimental seeds over approximately
+    195 seconds. The controller uses Q<sub>pos</sub> = 20 to prioritise accurate joint positioning when
+    approaching cubes and trays, Q<sub>vel</sub> = 1 to reduce joint-velocity errors, and R = 0.1 to penalise
+    excessive corrective actuator commands. These weights prioritise positioning accuracy while balancing
+    movement and control effort.
+  </p>
+  <p>
+    The tracking error graph shows average errors generally between 40–70 mrad, with peaks of approximately
+    80–85 mrad around 165–175 seconds. This indicates that the robot follows its joint references with varying
+    accuracy throughout the sorting process, with larger errors during certain movements.
+  </p>
+  <p>
+    The control effort graph shows command norms ranging from approximately 3.3 to 4.5, with higher values during
+    some periods of increased tracking error. This suggests that the controller applies greater corrective input
+    during more demanding movements. Similarly, the LQR stage cost graph increases from approximately 1.2 to 1.4
+    to peaks of 2.2 to 2.4, reflecting the combined penalties on joint-position error, velocity error and control
+    input. Finally, the actuator saturation graph remains at 0 across all ten seeds, showing that no recorded
+    commands reached the implemented actuator limits.
+  </p>
+  <p>
+    Overall, the results demonstrate that the LQR controller tracks joint references without actuator saturation,
+    although temporary increases in tracking error highlight opportunities to improve controller tuning and
+    trajectory tracking.
+  </p>
+
+  <h3>Figure 1</h3>
+  <figure>
+    <img src="static/cameraNoiseVsKalman.png" alt="Actual and estimated joint positions, joint estimation error and cube position error">
+    <figcaption>Figure 5: Actual and estimated joint positions, joint estimation error and cube position error.</figcaption>
+  </figure>
+  <p>
+    The three graphs evaluate how accurately the Kalman filters estimate the UR3e's joint positions and cube
+    positions, supporting the project's aim of using sensor-based estimates for autonomous pick-and-place
+    operations.
+  </p>
+  <p>
+    The first graph compares actual joint positions (solid lines) with Kalman estimates (dashed lines) for seed 1.
+    The six joints move through different ranges, with joint 1 reaching approximately 1.2 rad, joint 4 dropping to
+    −2.8 rad, and joint 6 reaching 2.8 rad. Despite these movements, the estimated and actual trajectories almost
+    completely overlap, showing that the observer accurately follows changes in joint positions.
+  </p>
+  <p>
+    The second graph measures joint estimation error across ten seeds. The average error remains around 1.1 to
+    1.3 mrad, with individual values occasionally reaching approximately 2.5 to 2.6 mrad. This demonstrates
+    relatively stable joint estimation throughout the simulation, providing accurate state information for forward
+    kinematics and LQR feedback control.
+  </p>
+  <p>
+    In contrast, the third graph shows greater variation in cube-position estimation. Errors remain around 2–3 mm
+    during quieter periods but increase significantly, exceeding 70 mm around 35–40 seconds and reaching
+    approximately 50–55 mm around 100 and 175 seconds. These peaks indicate periods when the estimated cube
+    position differs substantially from its actual position.
+  </p>
+  <p>
+    The constant-velocity Kalman model may contribute to these errors when the moving red cube accelerates or
+    changes direction, although the graph alone cannot confirm their exact cause.
+  </p>
+  <p>
+    Overall, the results demonstrate accurate and consistent joint estimation but less reliable cube tracking,
+    highlighting the need to improve dynamic position estimation to strengthen grasping accuracy and system
+    robustness.
+  </p>
+</section>
 
   </section>
 
@@ -614,11 +749,14 @@ python pick_place_estimated.py r b y</pre>
     <div class="table-scroll">
       <table>
         <tr><th>Member</th><th>Contribution</th></tr>
-        <tr><td>Tasnim Sarah</td><td>Tasnim contributed to implementing different parts of the simulation together as well as writing the contents of the project page. 
+        <tr><td>Tasnim Sarah</td><td>Tasnim created the repository and contributed to ensuring proper communication and organisation. Tasnim assisted in implementing different parts of the simulation together as well as creating the contents of the project page, such as the theoretical explanations and the graphs.
+
 </td></tr>
-        <tr><td>Maryam Qutub</td><td>blah</td></tr>
-        <tr><td>Princess Kisakye</td><td>Princess worked on the physical code by getting it to pick up objects, making the final video and contribution to the project page</td></tr>
-        <tr><td>Vanessa Kurniawidi</td><td>Vanessa created the environment where the simulation runs in, and also created the project page as well as worked on its contents.
+        <tr><td>Maryam Qutub</td><td>Maryam contributed to the controllability section of the simulation, which communicated sensor information regarding the pose of the cubes to the joint velocities of the UR3e. She also implemented the LQR and contributed to the observability of the system. She helped with debugging and making the simulation more robust.</td></tr>
+        <tr><td>Princess Kisakye</td><td>Princess worked on developing the codespace to achieve the specified criteria. She managed each of our roles and responsibilities. She developed the camera and kalman filter for the simulation, and helped with further integration. Princess was key to ensuring the simulation operated realistically and successfully, and allowed the team to understand what was occurring in the simulation.
+e</td></tr>
+        <tr><td>Vanessa Kurniawidi</td><td> Vanessa created the environment where the simulation runs in, and also created the project page and its contents; she created the system logic flowchart and the theoretical analysis. Vanessa also helped contribute to making the simulation more robust and allow for better runs, through debugging.
+
 </td></tr>
       </table>
     </div>
